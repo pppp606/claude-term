@@ -35,7 +35,7 @@ export async function connectCommand(options: ConnectOptions): Promise<void> {
   return new Promise((resolve) => {
     rl.question('Select a session (1-' + sessions.length + '): ', (answer) => {
       rl.close()
-      
+
       const sessionIndex = parseInt(answer, 10) - 1
       if (isNaN(sessionIndex) || sessionIndex < 0 || sessionIndex >= sessions.length) {
         console.error('Invalid session selection.')
@@ -45,24 +45,24 @@ export async function connectCommand(options: ConnectOptions): Promise<void> {
 
       const selectedSession = sessions[sessionIndex]
       console.log(`Connecting to session on port ${selectedSession.port}...`)
-      
+
       // Establish WebSocket connection to MCP server
       const wsUrl = `ws://localhost:${selectedSession.port}`
       const ws = new WebSocket(wsUrl)
-      
+
       ws.on('open', () => {
         console.log('Connected to Claude Code MCP server')
         console.log('Listening for events... (type :quit to exit)')
-        
+
         // Set up stdin command handling
         const stdinRl = readline.createInterface({
           input: process.stdin,
           output: process.stdout,
         })
-        
+
         stdinRl.on('line', (line: string) => {
           const trimmed = line.trim()
-          
+
           if (trimmed === ':quit') {
             console.log('Exiting...')
             stdinRl.close()
@@ -70,22 +70,22 @@ export async function connectCommand(options: ConnectOptions): Promise<void> {
             resolve()
             return
           }
-          
+
           if (trimmed.startsWith(':')) {
             console.log(`Unknown command: ${trimmed}`)
             return
           }
-          
+
           // For non-commands, ignore for now (placeholder for future functionality)
         })
-        
+
         // For testing, resolve immediately after setup
         // In real usage, this would stay in the interactive loop
         if (process.env.NODE_ENV === 'test') {
           resolve()
         }
       })
-      
+
       ws.on('message', (data: Buffer) => {
         try {
           const message = JSON.parse(data.toString())
@@ -94,12 +94,12 @@ export async function connectCommand(options: ConnectOptions): Promise<void> {
           console.error('Error parsing message:', error)
         }
       })
-      
+
       ws.on('error', (error: Error) => {
         console.error('WebSocket connection error:', error)
         resolve()
       })
-      
+
       ws.on('close', () => {
         console.log('Disconnected from Claude Code MCP server')
         resolve()

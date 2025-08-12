@@ -41,7 +41,7 @@ let mockRl: any
 describe('connect command', () => {
   beforeEach(() => {
     jest.clearAllMocks()
-    
+
     mockRl = {
       question: jest.fn(),
       close: jest.fn(),
@@ -50,9 +50,9 @@ describe('connect command', () => {
       pause: jest.fn(),
       resume: jest.fn(),
     }
-    
+
     mockCreateInterface.mockReturnValue(mockRl)
-    
+
     // Default WebSocket mock behavior - simulate connection error to resolve promise quickly
     mockWS.on.mockImplementation((...args: any[]) => {
       const [event, callback] = args
@@ -60,7 +60,7 @@ describe('connect command', () => {
         setTimeout(() => callback(new Error('Mock connection failed')), 10)
       }
     })
-    
+
     mockListSessions.mockReturnValue([
       {
         pid: 1234,
@@ -147,7 +147,7 @@ describe('connect command', () => {
 
       // Should create WebSocket with correct URL
       const expectedUrl = 'ws://localhost:3001'
-      const { WebSocket } = jest.requireMock('ws') as { WebSocket: jest.Mock }
+      const { WebSocket } = jest.requireMock('ws')
       expect(WebSocket).toHaveBeenCalledWith(expectedUrl)
     })
 
@@ -225,7 +225,7 @@ describe('connect command', () => {
             const mockMessage = JSON.stringify({
               jsonrpc: '2.0',
               method: 'claude/provideEdits',
-              params: { files: [{ path: 'test.ts', content: 'console.log("hello")' }] }
+              params: { files: [{ path: 'test.ts', content: 'console.log("hello")' }] },
             })
             callback(Buffer.from(mockMessage))
           }, 20)
@@ -235,10 +235,13 @@ describe('connect command', () => {
       await connectCommand(mockOptions)
 
       // Wait for message processing
-      await new Promise(resolve => setTimeout(resolve, 100))
+      await new Promise((resolve) => setTimeout(resolve, 100))
 
       // Should display the formatted event
-      expect(consoleSpy).toHaveBeenCalledWith('Event:', expect.stringContaining('claude/provideEdits'))
+      expect(consoleSpy).toHaveBeenCalledWith(
+        'Event:',
+        expect.stringContaining('claude/provideEdits'),
+      )
       consoleSpy.mockRestore()
     })
 
@@ -271,7 +274,7 @@ describe('connect command', () => {
       await connectCommand(mockOptions)
 
       // Wait for message processing
-      await new Promise(resolve => setTimeout(resolve, 100))
+      await new Promise((resolve) => setTimeout(resolve, 100))
 
       expect(errorSpy).toHaveBeenCalledWith('Error parsing message:', expect.any(Error))
       consoleSpy.mockRestore()
@@ -295,7 +298,7 @@ describe('connect command', () => {
         if (event === 'open') {
           setTimeout(() => {
             callback() // Simulate open event
-            
+
             // Simulate user typing :quit after connection
             const lineCallback = mockRl.on.mock.calls.find((call: any) => call[0] === 'line')?.[1]
             if (lineCallback && typeof lineCallback === 'function') {
@@ -310,7 +313,7 @@ describe('connect command', () => {
       await connectCommand(mockOptions)
 
       // Wait for command processing
-      await new Promise(resolve => setTimeout(resolve, 100))
+      await new Promise((resolve) => setTimeout(resolve, 100))
 
       expect(consoleSpy).toHaveBeenCalledWith('Exiting...')
       consoleSpy.mockRestore()
@@ -331,7 +334,7 @@ describe('connect command', () => {
         if (event === 'open') {
           setTimeout(() => {
             callback()
-            
+
             // Simulate user typing unknown command
             const lineCallback = mockRl.on.mock.calls.find((call: any) => call[0] === 'line')?.[1]
             if (lineCallback && typeof lineCallback === 'function') {
@@ -346,7 +349,7 @@ describe('connect command', () => {
       await connectCommand(mockOptions)
 
       // Wait for command processing
-      await new Promise(resolve => setTimeout(resolve, 100))
+      await new Promise((resolve) => setTimeout(resolve, 100))
 
       expect(consoleSpy).toHaveBeenCalledWith('Unknown command: :unknown')
       consoleSpy.mockRestore()
