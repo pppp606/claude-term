@@ -1,0 +1,22 @@
+{
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "allow": [
+      "Bash(cat:*)",
+      "Bash(cut:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(jq:*)",
+      "Bash(rg:*)",
+      "Bash(ls:*)",
+      "Bash(mv:*)",
+      "Bash(cp:*)",
+      "Bash(git:*)",
+      "Bash(gh:*)",
+      "View",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}
