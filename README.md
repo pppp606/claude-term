@@ -4,70 +4,113 @@
 
 ## Target Environment
 
-* Claude Code CLI runs as an MCP Server
-* Multiple Claude Code MCP Servers may run simultaneously
-* `claude-term` scans MCP lock/config files to list available sessions for selection
-* Receives diff proposals from Claude Code and displays them (e.g., with `delta`)
-* Integrates with CLI tools like `bat`/`fzf`/`git diff`
-* Once connected, no tmux/session awareness is required — all interaction happens in a single CLI process
+- Claude Code CLI runs as an MCP Server
+- Multiple Claude Code MCP Servers may run simultaneously
+- `claude-term` scans MCP lock/config files to list available sessions for selection
+- Receives diff proposals from Claude Code and displays them (e.g., with `delta`)
+- Integrates with CLI tools like `bat`/`fzf`/`git diff`
+- Once connected, no tmux/session awareness is required — all interaction happens in a single CLI process
 
 ## Tech Stack
 
-* **Language:** Node.js (TypeScript)
-* **CLI Framework:** commander
-* **Testing:** jest + ts-jest (TDD: Red-Green-Refactor)
-* **Code Style:** eslint + prettier
+- **Language:** Node.js (TypeScript)
+- **CLI Framework:** commander
+- **Testing:** jest + ts-jest (TDD: Red-Green-Refactor)
+- **Code Style:** eslint + prettier
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js 18.0.0 or higher
+- npm or yarn
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/pppp606/claude-term.git
+cd claude-term
+
+# Install dependencies
+npm install
+
+# Run tests
+npm test
+
+# Run linter
+npm run lint
+
+# Format code
+npm run format
+```
+
+### Development
+
+```bash
+# Run in development mode
+npm run dev
+
+# Build the project
+npm run build
+
+# Run tests in watch mode
+npm run test:watch
+
+# Type checking
+npm run typecheck
+```
 
 ## Development Roadmap
 
-### Step 0: Development Environment Setup (TDD)
+### Step 0: Development Environment Setup (TDD) ✅
 
-* Initialize TypeScript + Node.js project
-* Set up eslint, prettier, jest
-* Create base CLI entry point and sample test
+- Initialize TypeScript + Node.js project
+- Set up eslint, prettier, jest
+- Create base CLI entry point and sample test
 
 ### Step 1: MCP Session Discovery (lock parsing)
 
-* Scan `/tmp/claude-*.lock` files
-* Parse session info (port/context/project)
-* List sessions via CLI (non-interactive for now)
+- Scan `/tmp/claude-*.lock` files
+- Parse session info (port/context/project)
+- List sessions via CLI (non-interactive for now)
 
 ### Step 2: Interactive Connection & Event Loop
 
-* Select session and open MCP WebSocket
-* Stay connected in an interactive loop, printing incoming events
-* Accept basic commands (`:quit`, placeholder for `:send`)
+- Select session and open MCP WebSocket
+- Stay connected in an interactive loop, printing incoming events
+- Accept basic commands (`:quit`, placeholder for `:send`)
 
 ### Step 3: Handle Diff Proposals & Basic `:send`
 
-* Parse `claude/provideEdits` events
-* Display diffs (raw format; `--delta` integration later)
-* Implement `:send <path>` to send file content to MCP
+- Parse `claude/provideEdits` events
+- Display diffs (raw format; `--delta` integration later)
+- Implement `:send <path>` to send file content to MCP
 
 ### Step 4: fzf Integration (early)
 
-* Use `fzf` to select MCP session instead of numeric prompt
-* Add `:send` with no args → open `fzf` file picker
-* Fallback to basic prompt if `fzf` not installed
+- Use `fzf` to select MCP session instead of numeric prompt
+- Add `:send` with no args → open `fzf` file picker
+- Fallback to basic prompt if `fzf` not installed
 
 ### Step 5: Delta Integration & Output Modes
 
-* Add `--delta` flag to render diffs via `delta`
-* Add `--json` flag for machine-readable output
+- Add `--delta` flag to render diffs via `delta`
+- Add `--json` flag for machine-readable output
 
 ### Step 6+: Extended Features
 
-* Configuration file support
-* Watch mode enhancements
-* Additional MCP commands
+- Configuration file support
+- Watch mode enhancements
+- Additional MCP commands
 
 ## Name
 
 **Tool Name:** `claude-term`
 
-* A terminal-based MCP client for Claude Code
-* Designed for CLI-first workflows without GUI dependencies
+- A terminal-based MCP client for Claude Code
+- Designed for CLI-first workflows without GUI dependencies
 
 ## Minimal Initial Command
 
-* `claude-term connect` — select a session, connect, and start receiving events interactively
+- `claude-term connect` — select a session, connect, and start receiving events interactively
