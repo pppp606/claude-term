@@ -2,6 +2,7 @@
 
 import { Command } from 'commander'
 import { listSessions } from './session-discovery.js'
+import { connectCommand } from './connect.js'
 import { fileURLToPath } from 'url'
 import os from 'os'
 import path from 'path'
@@ -38,6 +39,18 @@ program
         )
       })
     }
+  })
+
+program
+  .command('connect')
+  .description('Connect to a Claude Code MCP server interactively')
+  .option(
+    '--lock-dir <path>',
+    'Directory to scan for lock files',
+    path.join(os.homedir(), '.claude', 'ide'),
+  )
+  .action(async (options: { lockDir: string }) => {
+    await connectCommand(options)
   })
 
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url)

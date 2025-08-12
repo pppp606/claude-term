@@ -200,4 +200,82 @@ describe('connect command', () => {
       consoleSpy.mockRestore()
     })
   })
+
+  describe('Interactive event loop', () => {
+    it('should display incoming WebSocket messages as formatted events', async () => {
+      const mockOptions = { lockDir: '/test/.claude/ide' }
+      const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {})
+
+      // Mock user selecting session 1
+      mockRl.question.mockImplementationOnce((...args: any[]) => {
+        const [_prompt, callback] = args
+        callback('1')
+      })
+
+      // Mock WebSocket receiving a message after connection
+      mockWS.on.mockImplementation((...args: any[]) => {
+        const [event, callback] = args
+        if (event === 'open') {
+          setTimeout(() => {
+            callback() // Simulate open event
+          }, 10)
+        } else if (event === 'message') {
+          // Store the message callback to trigger later
+          setTimeout(() => {
+            const mockMessage = JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'claude/provideEdits',
+              params: { files: [{ path: 'test.ts', content: 'console.log("hello")' }] }
+            })
+            callback(Buffer.from(mockMessage))
+          }, 20)
+        }
+      })
+
+      await connectCommand(mockOptions)
+
+      // Wait for message processing
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      // Should display the formatted event
+      expect(consoleSpy).toHaveBeenCalledWith('Event:', expect.stringContaining('claude/provideEdits'))
+      consoleSpy.mockRestore()
+    })
+
+    it('should handle malformed WebSocket messages gracefully', async () => {
+      const mockOptions = { lockDir: '/test/.claude/ide' }
+      const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {})
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+
+      // Mock user selecting session 1
+      mockRl.question.mockImplementationOnce((...args: any[]) => {
+        const [_prompt, callback] = args
+        callback('1')
+      })
+
+      // Mock WebSocket receiving malformed message
+      mockWS.on.mockImplementation((...args: any[]) => {
+        const [event, callback] = args
+        if (event === 'open') {
+          setTimeout(() => {
+            callback()
+          }, 10)
+        } else if (event === 'message') {
+          // Send malformed JSON
+          setTimeout(() => {
+            callback(Buffer.from('invalid json'))
+          }, 20)
+        }
+      })
+
+      await connectCommand(mockOptions)
+
+      // Wait for message processing
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      expect(errorSpy).toHaveBeenCalledWith('Error parsing message:', expect.any(Error))
+      consoleSpy.mockRestore()
+      errorSpy.mockRestore()
+    })
+  })
 })

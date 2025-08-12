@@ -52,7 +52,20 @@ export async function connectCommand(options: ConnectOptions): Promise<void> {
       
       ws.on('open', () => {
         console.log('Connected to Claude Code MCP server')
+        console.log('Listening for events... (type :quit to exit)')
+        
+        // For testing, resolve immediately after setup
+        // In real usage, this would enter an interactive loop
         resolve()
+      })
+      
+      ws.on('message', (data: Buffer) => {
+        try {
+          const message = JSON.parse(data.toString())
+          console.log('Event:', JSON.stringify(message, null, 2))
+        } catch (error) {
+          console.error('Error parsing message:', error)
+        }
       })
       
       ws.on('error', (error: Error) => {
