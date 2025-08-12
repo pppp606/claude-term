@@ -27,11 +27,25 @@ describe('CLI sessions command', () => {
   })
 
   it('should output session list when sessions exist', () => {
-    const session1 = { port: 8080, context: 'project1', project: '/path/to/project1' }
-    const session2 = { port: 8081, context: 'project2', project: '/path/to/project2' }
+    const session1Data = {
+      pid: 12345,
+      workspaceFolders: ['/path/to/project1'],
+      ideName: 'Cursor',
+      transport: 'ws',
+      runningInWindows: false,
+      authToken: 'token1',
+    }
+    const session2Data = {
+      pid: 12346,
+      workspaceFolders: ['/path/to/project2'],
+      ideName: 'Cursor',
+      transport: 'ws',
+      runningInWindows: false,
+      authToken: 'token2',
+    }
 
-    fs.writeFileSync(path.join(tempDir, 'claude-session1.lock'), JSON.stringify(session1))
-    fs.writeFileSync(path.join(tempDir, 'claude-session2.lock'), JSON.stringify(session2))
+    fs.writeFileSync(path.join(tempDir, '8080.lock'), JSON.stringify(session1Data))
+    fs.writeFileSync(path.join(tempDir, '8081.lock'), JSON.stringify(session2Data))
 
     const output = execSync(`node ${cliPath} sessions --lock-dir="${tempDir}"`, {
       encoding: 'utf8',
@@ -39,15 +53,22 @@ describe('CLI sessions command', () => {
     })
 
     expect(output).toContain('Found 2 Claude Code sessions:')
-    expect(output).toContain('Port: 8080, Context: project1, Project: /path/to/project1')
-    expect(output).toContain('Port: 8081, Context: project2, Project: /path/to/project2')
+    expect(output).toContain('Port: 8080, PID: 12345, IDE: Cursor, Workspaces: /path/to/project1')
+    expect(output).toContain('Port: 8081, PID: 12346, IDE: Cursor, Workspaces: /path/to/project2')
   })
 
   it('should ignore invalid lock files', () => {
-    const validSession = { port: 8080, context: 'valid', project: '/valid/project' }
+    const validSessionData = {
+      pid: 12345,
+      workspaceFolders: ['/valid/project'],
+      ideName: 'Cursor',
+      transport: 'ws',
+      runningInWindows: false,
+      authToken: 'valid-token',
+    }
 
-    fs.writeFileSync(path.join(tempDir, 'claude-valid.lock'), JSON.stringify(validSession))
-    fs.writeFileSync(path.join(tempDir, 'claude-invalid.lock'), 'invalid json')
+    fs.writeFileSync(path.join(tempDir, '8080.lock'), JSON.stringify(validSessionData))
+    fs.writeFileSync(path.join(tempDir, '8081.lock'), 'invalid json')
 
     const output = execSync(`node ${cliPath} sessions --lock-dir="${tempDir}"`, {
       encoding: 'utf8',
@@ -55,10 +76,10 @@ describe('CLI sessions command', () => {
     })
 
     expect(output).toContain('Found 1 Claude Code session:')
-    expect(output).toContain('Port: 8080, Context: valid, Project: /valid/project')
+    expect(output).toContain('Port: 8080, PID: 12345, IDE: Cursor, Workspaces: /valid/project')
   })
 
-  it('should use /tmp as default directory when no --lock-dir provided', () => {
+  it('should use ~/.claude/ide as default directory when no --lock-dir provided', () => {
     const output = execSync(`node ${cliPath} sessions`, {
       encoding: 'utf8',
       env: { ...process.env, NODE_ENV: 'test' },
