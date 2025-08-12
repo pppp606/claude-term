@@ -147,7 +147,7 @@ describe('connect command', () => {
 
       // Should create WebSocket with correct URL
       const expectedUrl = 'ws://localhost:3001'
-      const { WebSocket } = jest.requireMock('ws')
+      const { WebSocket } = jest.requireMock('ws') as { WebSocket: jest.Mock }
       expect(WebSocket).toHaveBeenCalledWith(expectedUrl)
     })
 
