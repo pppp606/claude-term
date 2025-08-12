@@ -3,6 +3,8 @@
 import { Command } from 'commander'
 import { listSessions } from './session-discovery.js'
 import { fileURLToPath } from 'url'
+import os from 'os'
+import path from 'path'
 
 const program = new Command()
 
@@ -14,7 +16,7 @@ program
 program
   .command('sessions')
   .description('List available Claude Code sessions')
-  .option('--lock-dir <path>', 'Directory to scan for lock files', '/tmp')
+  .option('--lock-dir <path>', 'Directory to scan for lock files', path.join(os.homedir(), '.claude', 'ide'))
   .action((options: { lockDir: string }) => {
     const sessions = listSessions(options.lockDir)
 
@@ -25,8 +27,9 @@ program
       console.log(`Found ${sessions.length} Claude Code ${sessionText}:`)
 
       sessions.forEach((session) => {
+        const workspaces = session.workspaceFolders.length > 0 ? session.workspaceFolders.join(', ') : 'No workspace'
         console.log(
-          `Port: ${session.port}, Context: ${session.context}, Project: ${session.project}`,
+          `Port: ${session.port}, PID: ${session.pid}, IDE: ${session.ideName}, Workspaces: ${workspaces}`,
         )
       })
     }
