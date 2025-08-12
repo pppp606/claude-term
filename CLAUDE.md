@@ -58,6 +58,7 @@ The project follows a TDD (Test-Driven Development) approach with Red-Green-Refa
 ## Development Phases
 
 Currently planning 6+ development steps as outlined in README:
+
 1. Development environment setup (TypeScript, testing, linting)
 2. MCP session discovery via lock file parsing
 3. Interactive connection and event loop
