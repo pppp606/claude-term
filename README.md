@@ -18,9 +18,52 @@
 * **Testing:** jest + ts-jest (TDD: Red-Green-Refactor)
 * **Code Style:** eslint + prettier
 
+## Getting Started
+
+### Prerequisites
+
+* Node.js 18.0.0 or higher
+* npm or yarn
+
+### Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/pppp606/claude-term.git
+cd claude-term
+
+# Install dependencies
+npm install
+
+# Run tests
+npm test
+
+# Run linter
+npm run lint
+
+# Format code
+npm run format
+```
+
+### Development
+
+```bash
+# Run in development mode
+npm run dev
+
+# Build the project
+npm run build
+
+# Run tests in watch mode
+npm run test:watch
+
+# Type checking
+npm run typecheck
+```
+
 ## Development Roadmap
 
-### Step 0: Development Environment Setup (TDD)
+### Step 0: Development Environment Setup (TDD) ✅
 
 * Initialize TypeScript + Node.js project
 * Set up eslint, prettier, jest
