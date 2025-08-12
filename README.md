@@ -1,104 +1,73 @@
-# claude-term
+# Project Overview: claude-term
 
-`claude-term` is a lightweight, terminal-based MCP client for [Claude Code](https://www.anthropic.com/news/claude-code),  
-enabling developers to interact with Claude Code’s AI-assisted coding features entirely from the command line.
+`claude-term` is a lightweight MCP client that connects the Anthropic Claude Code (MCP Server) with local CLI tools like `fzf`, `bat`, and `delta`. It allows developers to interact with Claude Code’s AI-assisted coding features entirely from the terminal, without relying on GUI IDEs like VSCode or Cursor.
 
-The tool integrates seamlessly with common CLI utilities such as `fzf`, `bat`, and `delta` to view files, browse git diffs, and apply AI-suggested code changes without the need for a GUI IDE.
+## Target Environment
 
----
+* Claude Code CLI runs as an MCP Server
+* Multiple Claude Code MCP Servers may run simultaneously
+* `claude-term` scans MCP lock/config files to list available sessions for selection
+* Receives diff proposals from Claude Code and displays them (e.g., with `delta`)
+* Integrates with CLI tools like `bat`/`fzf`/`git diff`
+* Once connected, no tmux/session awareness is required — all interaction happens in a single CLI process
 
-## 🚀 Key Features
+## Tech Stack
 
-- **MCP Connection Management**  
-  Automatically scan for running Claude Code MCP servers, list available instances, and connect to the desired session.
-  
-- **Terminal-First Workflow**  
-  Operate entirely in the terminal, integrating with your existing CLI tools.
+* **Language:** Node.js (TypeScript)
+* **CLI Framework:** commander
+* **Testing:** jest + ts-jest (TDD: Red-Green-Refactor)
+* **Code Style:** eslint + prettier
 
-- **AI-Suggested Diffs**  
-  Receive and display diff proposals from Claude Code directly in your terminal, optionally piping through `delta` for syntax-highlighted diffs.
+## Development Roadmap
 
-- **Lightweight & Fast**  
-  Designed to run with minimal overhead, without requiring tmux or GUI-based environments.
+### Step 0: Development Environment Setup (TDD)
 
-- **Extensible CLI**  
-  Built on Node.js + TypeScript with a modular architecture for future extensions such as file sending, watch mode, and interactive code review.
+* Initialize TypeScript + Node.js project
+* Set up eslint, prettier, jest
+* Create base CLI entry point and sample test
 
----
+### Step 1: MCP Session Discovery (lock parsing)
 
-## 🧩 Architecture Overview
+* Scan `/tmp/claude-*.lock` files
+* Parse session info (port/context/project)
+* List sessions via CLI (non-interactive for now)
 
-`claude-term` acts as an **MCP client**:
+### Step 2: Interactive Connection & Event Loop
 
-1. **Claude Code MCP Server**  
-   - Runs separately as the Claude Code CLI (`claude code`)  
-   - Exposes a WebSocket server for MCP communication
-   - Writes `.lock` and `.claude.json` files containing connection metadata
+* Select session and open MCP WebSocket
+* Stay connected in an interactive loop, printing incoming events
+* Accept basic commands (`:quit`, placeholder for `:send`)
 
-2. **claude-term MCP Client**  
-   - Scans for `.lock` files to discover running MCP servers  
-   - Allows the user to select an active session to connect to  
-   - Sends and receives JSON-RPC messages over WebSocket  
-   - Handles incoming AI proposals (e.g., diffs) and displays them in the terminal
+### Step 3: Handle Diff Proposals & Basic `:send`
 
----
+* Parse `claude/provideEdits` events
+* Display diffs (raw format; `--delta` integration later)
+* Implement `:send <path>` to send file content to MCP
 
-## 📦 Planned Development Roadmap
+### Step 4: fzf Integration (early)
 
-### Step 0: Development Environment Setup
-- Initialize TypeScript, eslint, prettier, jest
-- Configure CLI entry point and basic test
+* Use `fzf` to select MCP session instead of numeric prompt
+* Add `:send` with no args → open `fzf` file picker
+* Fallback to basic prompt if `fzf` not installed
 
-### Step 1: MCP Connection Discovery
-- Parse `.lock` files to list available Claude Code MCP servers
-- Provide an interactive selection interface (fzf-style)
+### Step 5: Delta Integration & Output Modes
 
-### Step 2: Diff Proposal Handling
-- Receive `claude/provideEdits` JSON-RPC events
-- Parse and display diffs in the terminal (optionally using `delta`)
+* Add `--delta` flag to render diffs via `delta`
+* Add `--json` flag for machine-readable output
 
-### Step 3: Extended CLI Features
-- Send files or selected code to Claude Code
-- Implement watch mode to automatically receive diffs
-- Provide JSON or pretty-printed outputs
+### Step 6+: Extended Features
 
----
+* Configuration file support
+* Watch mode enhancements
+* Additional MCP commands
 
-## 📜 Usage Example (Planned)
+## Name
 
-```bash
-# List available MCP connections and connect
-claude-term connect
+**Tool Name:** `claude-term`
 
-# Send a file to Claude Code for review
-claude-term send src/index.ts
+* A terminal-based MCP client for Claude Code
+* Designed for CLI-first workflows without GUI dependencies
 
-# Watch for incoming diff proposals and display them
-claude-term watch --delta
-````
+## Minimal Initial Command
 
----
-
-## 📂 Planned Directory Structure
-
-```
-claude-term/
-  ├── src/
-  │   ├── index.ts        # CLI entry point
-  │   ├── mcp/            # MCP client implementation
-  │   ├── utils/          # File & lock parsing utilities
-  │   └── commands/       # CLI commands
-  ├── tests/
-  ├── package.json
-  ├── tsconfig.json
-  ├── jest.config.js
-  ├── .eslintrc.js
-  ├── .prettierrc
-  └── README.md
-```
-
----
-
-## 📝 License
-
-MIT
+* `claude-term connect` — select a session, connect, and start receiving events interactively
