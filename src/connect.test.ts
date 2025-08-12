@@ -53,6 +53,14 @@ describe('connect command', () => {
     
     mockCreateInterface.mockReturnValue(mockRl)
     
+    // Default WebSocket mock behavior - simulate connection error to resolve promise quickly
+    mockWS.on.mockImplementation((...args: any[]) => {
+      const [event, callback] = args
+      if (event === 'error') {
+        setTimeout(() => callback(new Error('Mock connection failed')), 10)
+      }
+    })
+    
     mockListSessions.mockReturnValue([
       {
         pid: 1234,
@@ -123,5 +131,73 @@ describe('connect command', () => {
 
     expect(consoleSpy).toHaveBeenCalledWith('Invalid session selection.')
     consoleSpy.mockRestore()
+  })
+
+  describe('WebSocket connection', () => {
+    it('should establish WebSocket connection to selected session', async () => {
+      const mockOptions = { lockDir: '/test/.claude/ide' }
+
+      // Mock user selecting session 1 (index 0)
+      mockRl.question.mockImplementationOnce((...args: any[]) => {
+        const [_prompt, callback] = args
+        callback('1')
+      })
+
+      await connectCommand(mockOptions)
+
+      // Should create WebSocket with correct URL
+      const expectedUrl = 'ws://localhost:3001'
+      const { WebSocket } = jest.requireMock('ws') as { WebSocket: jest.Mock }
+      expect(WebSocket).toHaveBeenCalledWith(expectedUrl)
+    })
+
+    it('should handle WebSocket connection success', async () => {
+      const mockOptions = { lockDir: '/test/.claude/ide' }
+      const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {})
+
+      // Mock user selecting session 1 (index 0)
+      mockRl.question.mockImplementationOnce((...args: any[]) => {
+        const [_prompt, callback] = args
+        callback('1')
+      })
+
+      // Mock WebSocket open event
+      mockWS.on.mockImplementation((...args: any[]) => {
+        const [event, callback] = args
+        if (event === 'open') {
+          setTimeout(callback, 0) // Simulate async open
+        }
+      })
+
+      await connectCommand(mockOptions)
+
+      expect(consoleSpy).toHaveBeenCalledWith('Connected to Claude Code MCP server')
+      consoleSpy.mockRestore()
+    })
+
+    it('should handle WebSocket connection error', async () => {
+      const mockOptions = { lockDir: '/test/.claude/ide' }
+      const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {})
+
+      // Mock user selecting session 1 (index 0)
+      mockRl.question.mockImplementationOnce((...args: any[]) => {
+        const [_prompt, callback] = args
+        callback('1')
+      })
+
+      // Mock WebSocket error event
+      const mockError = new Error('Connection failed')
+      mockWS.on.mockImplementation((...args: any[]) => {
+        const [event, callback] = args
+        if (event === 'error') {
+          setTimeout(() => callback(mockError), 0) // Simulate async error
+        }
+      })
+
+      await connectCommand(mockOptions)
+
+      expect(consoleSpy).toHaveBeenCalledWith('WebSocket connection error:', mockError)
+      consoleSpy.mockRestore()
+    })
   })
 })

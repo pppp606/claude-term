@@ -2,6 +2,7 @@
 
 import { listSessions } from './session-discovery.js'
 import readline from 'readline'
+import { WebSocket } from 'ws'
 
 export interface ConnectOptions {
   lockDir: string
@@ -44,8 +45,25 @@ export async function connectCommand(options: ConnectOptions): Promise<void> {
 
       const selectedSession = sessions[sessionIndex]
       console.log(`Connecting to session on port ${selectedSession.port}...`)
-      // TODO: Implement WebSocket connection
-      resolve()
+      
+      // Establish WebSocket connection to MCP server
+      const wsUrl = `ws://localhost:${selectedSession.port}`
+      const ws = new WebSocket(wsUrl)
+      
+      ws.on('open', () => {
+        console.log('Connected to Claude Code MCP server')
+        resolve()
+      })
+      
+      ws.on('error', (error: Error) => {
+        console.error('WebSocket connection error:', error)
+        resolve()
+      })
+      
+      ws.on('close', () => {
+        console.log('Disconnected from Claude Code MCP server')
+        resolve()
+      })
     })
   })
 }
