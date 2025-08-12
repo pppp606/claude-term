@@ -15,33 +15,78 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-Since this is a new project in early development, the following commands will need to be set up:
+The following commands are available and should be used in the development workflow:
 
 ```bash
-# Install dependencies (once package.json exists)
+# Install dependencies
 npm install
 
-# Run tests (once jest is configured)
-npm test
-
-# Run linting (once eslint is configured)
-npm run lint
-
-# Format code (once prettier is configured)
-npm run format
-
-# Build TypeScript (once configured)
+# Build TypeScript to dist/
 npm run build
 
-# Run in development mode (once configured)
+# Run tests with jest
+npm test
+
+# Run type checking
+npm run typecheck
+
+# Run linting
+npm run lint
+
+# Auto-fix linting issues
+npm run lint:fix
+
+# Format code
+npm run format
+
+# Run in development mode
 npm run dev
 ```
 
+## Critical Development Workflow
+
+**IMPORTANT**: Always follow this workflow when making code changes:
+
+1. **Build-Test-Execute Cycle**: After any code changes, always run:
+   ```bash
+   npm run build
+   node dist/cli.js [command]  # Test actual functionality
+   ```
+
+2. **Quality Checks**: Before committing, ensure all checks pass:
+   ```bash
+   npm run typecheck  # TypeScript type checking
+   npm run lint       # ESLint compliance  
+   npm test          # All test suites
+   ```
+
+3. **Auto-fix when possible**:
+   ```bash
+   npm run lint:fix   # Fix linting issues automatically
+   npm run format     # Format code with prettier
+   ```
+
+4. **Real-world Testing**: Always test the actual CLI commands:
+   ```bash
+   # Test session discovery
+   node dist/cli.js sessions
+   
+   # Test with custom directory
+   node dist/cli.js sessions --lock-dir /path/to/test
+   ```
+
+This build-test-execute cycle is essential because:
+- TypeScript needs to be compiled to JavaScript before execution
+- Real CLI behavior may differ from unit tests
+- User-facing functionality must be verified manually
+
 ## Architecture Overview
 
-The project follows a TDD (Test-Driven Development) approach with Red-Green-Refactor cycles. Key architectural components planned:
+The project follows a TDD (Test-Driven Development) approach with Red-Green-Refactor cycles. Key architectural components:
 
-1. **MCP Session Discovery**: Scans `/tmp/claude-*.lock` files to find available Claude Code sessions
+1. **MCP Session Discovery**: Scans `~/.claude/ide/*.lock` files to find available Claude Code sessions
+   - Real format: `{pid, workspaceFolders, ideName, transport, runningInWindows, authToken}`
+   - Port extracted from filename (e.g., `16599.lock` → Port: 16599)
 2. **WebSocket Connection**: Maintains persistent connection to Claude Code MCP Server
 3. **Event Loop**: Interactive CLI loop for receiving and processing MCP events
 4. **Diff Handling**: Processes `claude/provideEdits` events and displays diffs
