@@ -278,4 +278,78 @@ describe('connect command', () => {
       errorSpy.mockRestore()
     })
   })
+
+  describe('stdin command handling', () => {
+    it('should handle :quit command to exit gracefully', async () => {
+      const mockOptions = { lockDir: '/test/.claude/ide' }
+
+      // Mock user selecting session 1
+      mockRl.question.mockImplementationOnce((...args: any[]) => {
+        const [_prompt, callback] = args
+        callback('1')
+      })
+
+      // Mock successful WebSocket connection
+      mockWS.on.mockImplementation((...args: any[]) => {
+        const [event, callback] = args
+        if (event === 'open') {
+          setTimeout(() => {
+            callback() // Simulate open event
+            
+            // Simulate user typing :quit after connection
+            const lineCallback = mockRl.on.mock.calls.find((call: any) => call[0] === 'line')?.[1]
+            if (lineCallback && typeof lineCallback === 'function') {
+              setTimeout(() => lineCallback(':quit'), 50)
+            }
+          }, 10)
+        }
+      })
+
+      const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {})
+
+      await connectCommand(mockOptions)
+
+      // Wait for command processing
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      expect(consoleSpy).toHaveBeenCalledWith('Exiting...')
+      consoleSpy.mockRestore()
+    })
+
+    it('should handle unknown commands gracefully', async () => {
+      const mockOptions = { lockDir: '/test/.claude/ide' }
+
+      // Mock user selecting session 1
+      mockRl.question.mockImplementationOnce((...args: any[]) => {
+        const [_prompt, callback] = args
+        callback('1')
+      })
+
+      // Mock WebSocket connection and unknown command
+      mockWS.on.mockImplementation((...args: any[]) => {
+        const [event, callback] = args
+        if (event === 'open') {
+          setTimeout(() => {
+            callback()
+            
+            // Simulate user typing unknown command
+            const lineCallback = mockRl.on.mock.calls.find((call: any) => call[0] === 'line')?.[1]
+            if (lineCallback && typeof lineCallback === 'function') {
+              setTimeout(() => lineCallback(':unknown'), 50)
+            }
+          }, 10)
+        }
+      })
+
+      const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {})
+
+      await connectCommand(mockOptions)
+
+      // Wait for command processing
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      expect(consoleSpy).toHaveBeenCalledWith('Unknown command: :unknown')
+      consoleSpy.mockRestore()
+    })
+  })
 })

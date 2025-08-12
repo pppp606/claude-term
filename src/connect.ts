@@ -54,9 +54,36 @@ export async function connectCommand(options: ConnectOptions): Promise<void> {
         console.log('Connected to Claude Code MCP server')
         console.log('Listening for events... (type :quit to exit)')
         
+        // Set up stdin command handling
+        const stdinRl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout,
+        })
+        
+        stdinRl.on('line', (line: string) => {
+          const trimmed = line.trim()
+          
+          if (trimmed === ':quit') {
+            console.log('Exiting...')
+            stdinRl.close()
+            ws.close()
+            resolve()
+            return
+          }
+          
+          if (trimmed.startsWith(':')) {
+            console.log(`Unknown command: ${trimmed}`)
+            return
+          }
+          
+          // For non-commands, ignore for now (placeholder for future functionality)
+        })
+        
         // For testing, resolve immediately after setup
-        // In real usage, this would enter an interactive loop
-        resolve()
+        // In real usage, this would stay in the interactive loop
+        if (process.env.NODE_ENV === 'test') {
+          resolve()
+        }
       })
       
       ws.on('message', (data: Buffer) => {
