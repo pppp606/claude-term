@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import { execSync } from 'child_process'
 
 export interface SessionInfo {
   pid: number
@@ -75,73 +76,138 @@ export function parseLockFile(lockPath: string): SessionInfo | null {
   }
 }
 
+// Get Claude MCP sessions by scanning running processes and ports
+function getActiveMCPSessions(): SessionInfo[] {
+  const sessions: SessionInfo[] = []
+  
+  try {
+    // Find Claude processes
+    const psOutput = execSync('ps aux | grep -E "(claude)" | grep -v grep', { encoding: 'utf8' })
+    const claudeProcesses = psOutput.trim().split('\n').filter(line => line.includes('claude'))
+    
+    for (const processLine of claudeProcesses) {
+      const parts = processLine.trim().split(/\s+/)
+      const pid = parseInt(parts[1], 10)
+      
+      if (isNaN(pid)) continue
+      
+      try {
+        // Find listening ports for this PID
+        const lsofOutput = execSync(`lsof -p ${pid} -P 2>/dev/null | grep LISTEN || true`, { encoding: 'utf8' })
+        const listeningPorts = lsofOutput.trim().split('\n')
+          .filter(line => line.includes('LISTEN'))
+          .map(line => {
+            const match = line.match(/127\.0\.0\.1[:.:](\d+)/)
+            return match ? parseInt(match[1], 10) : null
+          })
+          .filter(port => port !== null) as number[]
+        
+        // Get workspace info for each port by checking if corresponding lock file exists
+        for (const port of listeningPorts) {
+          const lockPath = path.join(os.homedir(), '.claude', 'ide', `${port}.lock`)
+          let sessionInfo: SessionInfo | null = null
+          
+          if (fs.existsSync(lockPath)) {
+            sessionInfo = parseLockFile(lockPath)
+          }
+          
+          if (sessionInfo) {
+            sessions.push(sessionInfo)
+          } else {
+            // Create basic session info if no lock file
+            sessions.push({
+              pid,
+              port,
+              workspaceFolders: [],
+              ideName: 'Claude Code',
+              transport: 'ws',
+              runningInWindows: false,
+              authToken: '', // Unknown without lock file
+            })
+          }
+        }
+      } catch {
+        // Ignore errors for individual processes
+      }
+    }
+  } catch {
+    // If process-based detection fails, fall back to lock files
+    return getLockFileSessions()
+  }
+  
+  return sessions.length > 0 ? sessions : getLockFileSessions()
+}
+
 // Removed unused defaultLockDir - now using auto-detection
 
-// Decode project path from Claude's encoding format
-function decodeProjectPath(encodedPath: string): string {
-  // Claude encodes paths like: -Users-yuki-t-Dev-claude-term
-  // Convert back to: /Users/yuki.t/Dev/claude-term
-  return encodedPath.replace(/^-/, '/').replace(/-/g, '/')
-}
+// Removed unused path decoding
+
+// Removed unused project session info extraction
 
 // Get current working directory project sessions
 function getCurrentProjectSessions(): SessionInfo[] {
   const currentDir = process.cwd()
-  const claudeDir = path.join(os.homedir(), '.claude')
-  const projectsDir = path.join(claudeDir, 'projects')
   
-  if (!fs.existsSync(projectsDir)) {
+  // Get all active sessions
+  const allSessions = getActiveMCPSessions()
+  
+  // Filter sessions that match current directory
+  const relevantSessions = allSessions.filter(session => {
+    // Check if any workspace folder matches current directory
+    return session.workspaceFolders.some(workspace => 
+      currentDir.startsWith(workspace) || workspace.startsWith(currentDir)
+    )
+  })
+  
+  // If no direct matches, look for partial matches (like parent/child directories)
+  if (relevantSessions.length === 0) {
+    const partialMatches = allSessions.filter(session => {
+      return session.workspaceFolders.some(workspace => {
+        const currentBasename = path.basename(currentDir)
+        const workspaceBasename = path.basename(workspace)
+        return currentBasename === workspaceBasename || 
+               workspace.includes(currentBasename) ||
+               currentDir.includes(workspaceBasename)
+      })
+    })
+    
+    if (partialMatches.length > 0) {
+      return partialMatches
+    }
+  }
+  
+  return relevantSessions
+}
+
+// Get sessions from lock files in ide directory
+function getLockFileSessions(): SessionInfo[] {
+  const sessions: SessionInfo[] = []
+  const claudeDir = path.join(os.homedir(), '.claude')
+  const ideDir = path.join(claudeDir, 'ide')
+  
+  if (!fs.existsSync(ideDir)) {
     return []
   }
   
-  const sessions: SessionInfo[] = []
-  
   try {
-    const projectDirs = fs.readdirSync(projectsDir)
-    
-    for (const encodedProjectPath of projectDirs) {
-      const decodedPath = decodeProjectPath(encodedProjectPath)
-      
-      // Check if current directory is within this project
-      if (currentDir.startsWith(decodedPath)) {
-        const projectDir = path.join(projectsDir, encodedProjectPath)
-        
-        if (fs.statSync(projectDir).isDirectory()) {
-          const lockFiles = fs.readdirSync(projectDir).filter(file => file.endsWith('.lock'))
-          
-          for (const lockFile of lockFiles) {
-            const lockPath = path.join(projectDir, lockFile)
-            const sessionInfo = parseLockFile(lockPath)
-            if (sessionInfo) {
-              sessions.push(sessionInfo)
-            }
-          }
-        }
+    const files = fs.readdirSync(ideDir)
+    const lockFiles = files.filter((file) => file.endsWith('.lock'))
+
+    for (const lockFile of lockFiles) {
+      const lockPath = path.join(ideDir, lockFile)
+      const sessionInfo = parseLockFile(lockPath)
+      if (sessionInfo) {
+        sessions.push(sessionInfo)
       }
     }
   } catch {
-    // Ignore errors in project scanning
+    // Ignore errors
   }
   
   return sessions
 }
 
-// Get all potential Claude lock directories (legacy support)
-function getClaudeLockDirectories(): string[] {
-  const claudeDir = path.join(os.homedir(), '.claude')
-  const potentialDirs = [
-    path.join(claudeDir, 'ide'),    // IDE connections (legacy)
-    claudeDir,                      // Root claude directory
-  ]
-  
-  return potentialDirs.filter(dir => {
-    try {
-      return fs.existsSync(dir) && fs.statSync(dir).isDirectory()
-    } catch {
-      return false
-    }
-  })
-}
+// Removed unused legacy directory scanning
 
 export function listSessions(lockDir?: string): SessionInfo[] {
   try {
@@ -165,32 +231,15 @@ export function listSessions(lockDir?: string): SessionInfo[] {
 
     // Smart detection: prioritize current project sessions
     const currentProjectSessions = getCurrentProjectSessions()
-    if (currentProjectSessions.length > 0) {
+    const allSessions = getActiveMCPSessions()
+    
+    // If we found project-specific sessions, return those
+    if (currentProjectSessions.length > 0 && currentProjectSessions.length < allSessions.length) {
       return currentProjectSessions
     }
 
-    // Fallback to legacy directory scanning
-    const sessions: SessionInfo[] = []
-    const dirsToSearch = getClaudeLockDirectories()
-    
-    for (const dir of dirsToSearch) {
-      if (!fs.existsSync(dir)) {
-        continue
-      }
-
-      const files = fs.readdirSync(dir)
-      const lockFiles = files.filter((file) => file.endsWith('.lock'))
-
-      for (const lockFile of lockFiles) {
-        const lockPath = path.join(dir, lockFile)
-        const sessionInfo = parseLockFile(lockPath)
-        if (sessionInfo) {
-          sessions.push(sessionInfo)
-        }
-      }
-    }
-
-    return sessions
+    // Otherwise, return all sessions
+    return allSessions
   } catch (error) {
     return []
   }
@@ -198,55 +247,6 @@ export function listSessions(lockDir?: string): SessionInfo[] {
 
 // New export for getting all sessions (including non-current projects)
 export function listAllSessions(): SessionInfo[] {
-  const allSessions: SessionInfo[] = []
-  
-  try {
-    // Get sessions from projects directory
-    const claudeDir = path.join(os.homedir(), '.claude')
-    const projectsDir = path.join(claudeDir, 'projects')
-    
-    if (fs.existsSync(projectsDir)) {
-      const projectDirs = fs.readdirSync(projectsDir)
-      
-      for (const projectDir of projectDirs) {
-        const fullProjectPath = path.join(projectsDir, projectDir)
-        
-        if (fs.statSync(fullProjectPath).isDirectory()) {
-          const lockFiles = fs.readdirSync(fullProjectPath).filter(file => file.endsWith('.lock'))
-          
-          for (const lockFile of lockFiles) {
-            const lockPath = path.join(fullProjectPath, lockFile)
-            const sessionInfo = parseLockFile(lockPath)
-            if (sessionInfo) {
-              // Add project context
-              const decodedPath = decodeProjectPath(projectDir)
-              sessionInfo.workspaceFolders = sessionInfo.workspaceFolders.length > 0 
-                ? sessionInfo.workspaceFolders 
-                : [decodedPath]
-              allSessions.push(sessionInfo)
-            }
-          }
-        }
-      }
-    }
-
-    // Add legacy sessions
-    const legacySessions = getClaudeLockDirectories().flatMap(dir => {
-      if (!fs.existsSync(dir)) return []
-      
-      const files = fs.readdirSync(dir)
-      const lockFiles = files.filter((file) => file.endsWith('.lock'))
-      
-      return lockFiles.map(lockFile => {
-        const lockPath = path.join(dir, lockFile)
-        return parseLockFile(lockPath)
-      }).filter(session => session !== null) as SessionInfo[]
-    })
-
-    allSessions.push(...legacySessions)
-  } catch {
-    // Ignore errors
-  }
-
-  return allSessions
+  // Use process-based detection to get all active sessions
+  return getActiveMCPSessions()
 }
