@@ -33,6 +33,8 @@ export class InteractiveSession extends EventEmitter {
     this.ws.on('message', (data: Buffer) => {
       try {
         const message: MCPMessage = JSON.parse(data.toString())
+        console.log('\n🔍 DEBUG: Received message from Claude Code:')
+        console.log(JSON.stringify(message, null, 2))
         this.handleMCPMessage(message)
       } catch (error) {
         console.error('Error parsing message:', error)

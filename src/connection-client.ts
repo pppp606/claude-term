@@ -58,7 +58,10 @@ export class ConnectionClient {
   public displaySessionList(sessions: SessionInfo[]): void {
     console.log('Available Claude Code sessions:')
     sessions.forEach((session, index) => {
-      console.log(`  ${index + 1}) ${session.ideName} (Port: ${session.port}, PID: ${session.pid})`)
+      const workspaces = session.workspaceFolders.length > 0 
+        ? session.workspaceFolders.map(w => w.split('/').pop()).join(', ') 
+        : 'unknown'
+      console.log(`  ${index + 1}) ${session.ideName} (Port: ${session.port}) - ${workspaces}`)
     })
     console.log(`\nSelect a session (1-${sessions.length}):`)
   }
