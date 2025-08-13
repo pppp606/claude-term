@@ -5,6 +5,8 @@ import { randomUUID } from 'crypto'
 import { execSync } from 'child_process'
 import path from 'path'
 import os from 'os'
+import { PromptSender } from './prompt-sender.js'
+import { PromptResponse } from './types/prompt-types.js'
 
 export interface DiffProposal {
   filePath: string
@@ -22,11 +24,14 @@ export interface MCPMessage {
 
 export class InteractiveSession extends EventEmitter {
   private ws: WebSocket
+  private promptSender: PromptSender
 
   constructor(websocket: WebSocket) {
     super()
     this.ws = websocket
+    this.promptSender = new PromptSender(websocket)
     this.setupWebSocketHandlers()
+    this.setupPromptHandlers()
   }
 
   private setupWebSocketHandlers(): void {
@@ -52,9 +57,30 @@ export class InteractiveSession extends EventEmitter {
     })
   }
 
+  private setupPromptHandlers(): void {
+    this.promptSender.on('promptResponse', (result) => {
+      console.log('\n✨ Claude responded:')
+      console.log(result.response)
+      if (result.conversationId) {
+        console.log(`\n🔗 Conversation ID: ${result.conversationId}`)
+      }
+      console.log('')
+    })
+
+    this.promptSender.on('promptError', (error) => {
+      console.error('\n❌ Error from Claude:')
+      console.error(`${error.message} (Code: ${error.code})`)
+      console.log('')
+    })
+  }
+
   private handleMCPMessage(message: MCPMessage): void {
     if (message.method === 'claude/provideEdits') {
       this.handleProvideEdits(message)
+    } else if (message.method === 'claude/promptResponse' || message.method === 'claude/sendPrompt') {
+      // Handle prompt responses
+      const response = message as unknown as PromptResponse
+      this.promptSender.handleResponse(response)
     }
     // Ignore other methods for now
   }
@@ -77,24 +103,28 @@ export class InteractiveSession extends EventEmitter {
 
   public displayDiff(diff: DiffProposal): void {
     console.log(`\n📝 Diff proposal for: ${diff.filePath}`)
-    
+
     try {
       // Create temporary files for original and modified content
       const tmpDir = os.tmpdir()
       const originalFile = path.join(tmpDir, `claude-term-original-${randomUUID()}`)
       const modifiedFile = path.join(tmpDir, `claude-term-modified-${randomUUID()}`)
-      
+
       fs.writeFileSync(originalFile, diff.originalContent)
       fs.writeFileSync(modifiedFile, diff.modifiedContent)
-      
+
       // Try to use delta first, fall back to diff
       try {
-        const deltaOutput = execSync(`delta "${originalFile}" "${modifiedFile}"`, { encoding: 'utf8' })
+        const deltaOutput = execSync(`delta "${originalFile}" "${modifiedFile}"`, {
+          encoding: 'utf8',
+        })
         console.log(deltaOutput)
       } catch (deltaError) {
         // Delta not available, try diff with unified format
         try {
-          const diffOutput = execSync(`diff -u "${originalFile}" "${modifiedFile}"`, { encoding: 'utf8' })
+          const diffOutput = execSync(`diff -u "${originalFile}" "${modifiedFile}"`, {
+            encoding: 'utf8',
+          })
           console.log(diffOutput)
         } catch (diffError) {
           // Both delta and diff failed, fall back to simple unified diff display
@@ -102,18 +132,69 @@ export class InteractiveSession extends EventEmitter {
           console.log(diff.unified)
         }
       }
-      
+
       // Clean up temporary files
       fs.unlinkSync(originalFile)
       fs.unlinkSync(modifiedFile)
-      
     } catch (error) {
       console.error('Error creating diff display:', error)
       console.log('Falling back to basic diff:')
       console.log(diff.unified)
     }
-    
+
     console.log('')
+  }
+
+  public sendPrompt(message: string): void {
+    try {
+      console.log(`\n📤 Sending prompt to Claude: "${message}"`)
+      this.promptSender.sendPrompt(message)
+    } catch (error) {
+      console.error('Error sending prompt:', error)
+    }
+  }
+
+  public handleContextCommand(args: string): void {
+    // Parse arguments: files come first, message is the last part
+    const parts = args.split(' ')
+    if (parts.length < 2) {
+      console.log('Usage: :context <files...> <message>')
+      console.log('Example: :context src/main.ts src/utils.ts Please review these files')
+      return
+    }
+
+    // Find where the message starts (look for the first non-file-like argument)
+    let messageStartIndex = -1
+    for (let i = 0; i < parts.length; i++) {
+      // If the part doesn't look like a file path, consider it the start of the message
+      if (!parts[i].includes('.') && !parts[i].startsWith('./') && !parts[i].startsWith('/')) {
+        messageStartIndex = i
+        break
+      }
+    }
+
+    if (messageStartIndex === -1) {
+      // If we can't find a clear message start, assume the last part is the message
+      messageStartIndex = parts.length - 1
+    }
+
+    const filePaths = parts.slice(0, messageStartIndex)
+    const message = parts.slice(messageStartIndex).join(' ')
+
+    if (filePaths.length === 0 || !message) {
+      console.log('Usage: :context <files...> <message>')
+      return
+    }
+
+    try {
+      console.log(`\n📤 Sending prompt with context: "${message}"`)
+      console.log(`📁 Including files: ${filePaths.join(', ')}`)
+      
+      const context = this.promptSender.gatherFileContext(filePaths)
+      this.promptSender.sendPrompt(message, context)
+    } catch (error) {
+      console.error('Error sending contextual prompt:', error)
+    }
   }
 
   public async sendFile(filePath: string): Promise<void> {
@@ -141,6 +222,9 @@ export class InteractiveSession extends EventEmitter {
 
     if (trimmed === ':help') {
       console.log('Available commands:')
+      console.log('  :prompt <message> - Send prompt/message to Claude')
+      console.log('  :ask <message> - Alias for :prompt')
+      console.log('  :context <files...> <message> - Send prompt with file context')
       console.log('  :send <path> - Send file content to Claude')
       console.log('  :browse - Browse files with fzf (interactive file picker)')
       console.log('  :cat <path> - Display file with syntax highlighting (bat)')
@@ -149,6 +233,17 @@ export class InteractiveSession extends EventEmitter {
       console.log('  :quit - Exit the session')
     } else if (trimmed === ':quit') {
       this.emit('quit')
+    } else if (trimmed.startsWith(':prompt ') || trimmed.startsWith(':ask ')) {
+      const message = trimmed.startsWith(':prompt ') 
+        ? trimmed.substring(8).trim() 
+        : trimmed.substring(5).trim()
+      if (message) {
+        this.sendPrompt(message)
+      } else {
+        console.log('Usage: :prompt <message> or :ask <message>')
+      }
+    } else if (trimmed.startsWith(':context ')) {
+      this.handleContextCommand(trimmed.substring(9).trim())
     } else if (trimmed.startsWith(':send ')) {
       const filePath = trimmed.substring(6).trim()
       if (filePath) {
@@ -182,11 +277,14 @@ export class InteractiveSession extends EventEmitter {
   public browseFiles(): void {
     try {
       console.log('\n📁 Browsing files with fzf...')
-      const selectedFile = execSync('find . -type f -not -path "./node_modules/*" -not -path "./.git/*" | fzf --preview="bat --color=always --style=header,grid --line-range :300 {}"', {
-        encoding: 'utf8',
-        stdio: 'inherit'
-      }).trim()
-      
+      const selectedFile = execSync(
+        'find . -type f -not -path "./node_modules/*" -not -path "./.git/*" | fzf --preview="bat --color=always --style=header,grid --line-range :300 {}"',
+        {
+          encoding: 'utf8',
+          stdio: 'inherit',
+        },
+      ).trim()
+
       if (selectedFile) {
         console.log(`\n📋 Selected: ${selectedFile}`)
         console.log('Available actions:')
@@ -204,7 +302,9 @@ export class InteractiveSession extends EventEmitter {
       console.log(`\n📄 Displaying: ${filePath}`)
       // Try bat first for syntax highlighting
       try {
-        execSync(`bat --color=always --style=header,grid,numbers "${filePath}"`, { stdio: 'inherit' })
+        execSync(`bat --color=always --style=header,grid,numbers "${filePath}"`, {
+          stdio: 'inherit',
+        })
       } catch {
         // Fall back to cat if bat is not available
         try {
@@ -223,19 +323,24 @@ export class InteractiveSession extends EventEmitter {
       console.log(`\n🔍 Searching for: ${pattern}`)
       // Try ripgrep first
       try {
-        execSync(`rg --color=always --heading --line-number "${pattern}"`, { 
+        execSync(`rg --color=always --heading --line-number "${pattern}"`, {
           stdio: 'inherit',
-          cwd: process.cwd()
+          cwd: process.cwd(),
         })
       } catch {
         // Fall back to grep if rg is not available
         try {
-          execSync(`grep -r -n --color=always "${pattern}" . --exclude-dir=node_modules --exclude-dir=.git`, { 
-            stdio: 'inherit' 
-          })
+          execSync(
+            `grep -r -n --color=always "${pattern}" . --exclude-dir=node_modules --exclude-dir=.git`,
+            {
+              stdio: 'inherit',
+            },
+          )
         } catch {
           console.log('⚠️  No matches found or search tools unavailable')
-          console.log('Install ripgrep: brew install ripgrep (macOS) or apt install ripgrep (Ubuntu)')
+          console.log(
+            'Install ripgrep: brew install ripgrep (macOS) or apt install ripgrep (Ubuntu)',
+          )
         }
       }
     } catch (error) {
