@@ -175,6 +175,9 @@ describe('InteractiveSession', () => {
 
       expect(consoleSpy).toHaveBeenCalledWith('Available commands:')
       expect(consoleSpy).toHaveBeenCalledWith('  :send <path> - Send file content to Claude')
+      expect(consoleSpy).toHaveBeenCalledWith('  :browse - Browse files with fzf (interactive file picker)')
+      expect(consoleSpy).toHaveBeenCalledWith('  :cat <path> - Display file with syntax highlighting (bat)')
+      expect(consoleSpy).toHaveBeenCalledWith('  :search <pattern> - Search code with ripgrep')
       expect(consoleSpy).toHaveBeenCalledWith('  :help - Show this help message')
       expect(consoleSpy).toHaveBeenCalledWith('  :quit - Exit the session')
 

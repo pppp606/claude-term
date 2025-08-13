@@ -15,8 +15,6 @@ export class ConnectionClient {
       this.ws = new WebSocket(url)
 
       this.ws.on('open', () => {
-        console.log('✅ Connected successfully!')
-
         if (this.ws) {
           this.session = new InteractiveSession(this.ws)
           resolve(this.session)

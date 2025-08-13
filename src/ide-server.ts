@@ -24,8 +24,8 @@ export class ClaudeTermIDEServer {
 
   async start(): Promise<number> {
     // Create WebSocket server
-    this.server = new WebSocketServer({ 
-      port: this.options.port || 0 // Use 0 for dynamic port assignment
+    this.server = new WebSocketServer({
+      port: this.options.port || 0, // Use 0 for dynamic port assignment
     })
 
     return new Promise((resolve, reject) => {
@@ -41,10 +41,10 @@ export class ClaudeTermIDEServer {
         if (typeof address === 'object' && address) {
           this.port = address.port
           console.log(`IDE Server listening on port ${this.port}`)
-          
+
           // Create lock file
           this.createLockFile()
-          
+
           resolve(this.port)
         } else {
           reject(new Error('Failed to get server address'))
@@ -52,7 +52,7 @@ export class ClaudeTermIDEServer {
       })
 
       this.server.on('connection', this.handleConnection.bind(this))
-      
+
       this.server.on('error', (error) => {
         reject(error)
       })
@@ -66,7 +66,7 @@ export class ClaudeTermIDEServer {
       ideName: this.options.ideName || 'claude-term',
       transport: 'ws',
       runningInWindows: false,
-      authToken: this.authToken
+      authToken: this.authToken,
     }
 
     const ideDir = path.join(os.homedir(), '.claude', 'ide')
@@ -81,17 +81,16 @@ export class ClaudeTermIDEServer {
 
   private handleConnection(ws: WebSocket): void {
     console.log('Claude Code connected!')
-    
+
     ws.on('message', (data: Buffer) => {
       try {
         const message = JSON.parse(data.toString())
-        console.log('\n📨 Received from Claude:', JSON.stringify(message, null, 2))
-        
+
         // Handle different MCP message types
         if (message.method === 'initialize') {
           this.handleInitialize(ws, message)
         } else if (message.method === 'notifications/initialized') {
-          console.log('✅ Claude Code initialization complete')
+          // Claude Code initialization complete - silent
         } else if (message.method?.startsWith('tools/')) {
           this.handleToolCall(ws, message)
         } else if (message.method?.startsWith('resources/')) {
@@ -101,7 +100,7 @@ export class ClaudeTermIDEServer {
           const response = {
             jsonrpc: '2.0',
             id: message.id,
-            result: { status: 'ok', message: 'Not implemented yet' }
+            result: { status: 'ok', message: 'Not implemented yet' },
           }
           ws.send(JSON.stringify(response))
         }
@@ -109,7 +108,7 @@ export class ClaudeTermIDEServer {
         console.error('❌ Error handling message:', error)
       }
     })
-    
+
     ws.on('close', () => {
       console.log('👋 Claude Code disconnected')
     })
@@ -132,54 +131,51 @@ export class ClaudeTermIDEServer {
               inputSchema: {
                 type: 'object',
                 properties: {
-                  path: { type: 'string', description: 'File path to read' }
+                  path: { type: 'string', description: 'File path to read' },
                 },
-                required: ['path']
-              }
+                required: ['path'],
+              },
             },
             write_file: {
-              description: 'Write file contents', 
+              description: 'Write file contents',
               inputSchema: {
                 type: 'object',
                 properties: {
                   path: { type: 'string', description: 'File path to write' },
-                  content: { type: 'string', description: 'Content to write' }
+                  content: { type: 'string', description: 'Content to write' },
                 },
-                required: ['path', 'content']
-              }
+                required: ['path', 'content'],
+              },
             },
             list_files: {
               description: 'List files in directory',
               inputSchema: {
-                type: 'object', 
+                type: 'object',
                 properties: {
-                  path: { type: 'string', description: 'Directory path', default: '.' }
-                }
-              }
-            }
+                  path: { type: 'string', description: 'Directory path', default: '.' },
+                },
+              },
+            },
           },
-          resources: {}
+          resources: {},
         },
         serverInfo: {
           name: 'claude-term',
-          version: '0.0.1'
-        }
-      }
+          version: '0.0.1',
+        },
+      },
     }
-    
-    console.log('🤝 Sending initialization response...')
+
     ws.send(JSON.stringify(response))
   }
 
   private handleToolCall(ws: WebSocket, message: any): void {
     const toolName = message.method.replace('tools/', '')
     const params = message.params || {}
-    
-    console.log(`🔧 Tool call: ${toolName}`, params)
-    
+
     try {
       let result: any
-      
+
       switch (toolName) {
         case 'read_file':
           result = this.readFile(params.path)
@@ -193,13 +189,13 @@ export class ClaudeTermIDEServer {
         default:
           throw new Error(`Unknown tool: ${toolName}`)
       }
-      
+
       const response = {
         jsonrpc: '2.0',
         id: message.id,
-        result: { content: [{ type: 'text', text: result }] }
+        result: { content: [{ type: 'text', text: result }] },
       }
-      
+
       ws.send(JSON.stringify(response))
     } catch (error) {
       const errorResponse = {
@@ -207,10 +203,10 @@ export class ClaudeTermIDEServer {
         id: message.id,
         error: {
           code: -32000,
-          message: error instanceof Error ? error.message : 'Unknown error'
-        }
+          message: error instanceof Error ? error.message : 'Unknown error',
+        },
       }
-      
+
       ws.send(JSON.stringify(errorResponse))
     }
   }
@@ -220,29 +216,25 @@ export class ClaudeTermIDEServer {
     const response = {
       jsonrpc: '2.0',
       id: message.id,
-      result: { resources: [] }
+      result: { resources: [] },
     }
-    
+
     ws.send(JSON.stringify(response))
   }
 
   private readFile(filePath: string): string {
     const fs = require('fs')
     const path = require('path')
-    
+
     const fullPath = path.resolve(this.options.workspaceFolder || process.cwd(), filePath)
-    console.log(`📖 Reading file: ${fullPath}`)
-    
     return fs.readFileSync(fullPath, 'utf8')
   }
 
   private writeFile(filePath: string, content: string): string {
     const fs = require('fs')
     const path = require('path')
-    
+
     const fullPath = path.resolve(this.options.workspaceFolder || process.cwd(), filePath)
-    console.log(`✏️  Writing file: ${fullPath}`)
-    
     fs.writeFileSync(fullPath, content)
     return `File written successfully: ${filePath}`
   }
@@ -250,10 +242,8 @@ export class ClaudeTermIDEServer {
   private listFiles(dirPath: string): string {
     const fs = require('fs')
     const path = require('path')
-    
+
     const fullPath = path.resolve(this.options.workspaceFolder || process.cwd(), dirPath)
-    console.log(`📁 Listing directory: ${fullPath}`)
-    
     const files = fs.readdirSync(fullPath)
     return files.join('\n')
   }
@@ -276,14 +266,14 @@ export async function startIDEServer(options: IDEServerOptions): Promise<void> {
   // Check if an IDE with the same name already exists
   const ideName = options.ideName || 'claude-term'
   const ideDir = path.join(os.homedir(), '.claude', 'ide')
-  
+
   if (fs.existsSync(ideDir)) {
-    const lockFiles = fs.readdirSync(ideDir).filter(f => f.endsWith('.lock'))
+    const lockFiles = fs.readdirSync(ideDir).filter((f) => f.endsWith('.lock'))
     for (const lockFile of lockFiles) {
       try {
         const lockPath = path.join(ideDir, lockFile)
         const lockData = JSON.parse(fs.readFileSync(lockPath, 'utf8'))
-        
+
         if (lockData.ideName === ideName) {
           const port = parseInt(lockFile.replace('.lock', ''))
           console.log(`⚠️  IDE server "${ideName}" is already running on port ${port}`)
@@ -301,7 +291,7 @@ export async function startIDEServer(options: IDEServerOptions): Promise<void> {
   }
 
   const server = new ClaudeTermIDEServer(options)
-  
+
   // Handle graceful shutdown
   const shutdown = async () => {
     console.log('\nShutting down IDE server...')
@@ -316,7 +306,7 @@ export async function startIDEServer(options: IDEServerOptions): Promise<void> {
     const port = await server.start()
     const workspace = options.workspaceFolder || process.cwd()
     const name = ideName
-    
+
     console.log('🚀 claude-term IDE server started')
     console.log(`📦 IDE Name: ${name}`)
     console.log(`📁 Workspace: ${workspace}`)
@@ -326,7 +316,7 @@ export async function startIDEServer(options: IDEServerOptions): Promise<void> {
     console.log(`2. Select: ${name}`)
     console.log('3. Start coding!\n')
     console.log('Waiting for connection...')
-    
+
     // Keep the process alive
     await new Promise(() => {}) // Never resolves
   } catch (error) {
