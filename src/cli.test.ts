@@ -52,7 +52,7 @@ describe('CLI sessions command', () => {
       env: { ...process.env, NODE_ENV: 'test' },
     })
 
-    expect(output).toContain('Found 2 Claude Code sessions:')
+    expect(output).toContain('Found 2 Claude Code sessions (current project context):')
     expect(output).toContain('Port: 8080, PID: 12345, IDE: Cursor, Workspaces: /path/to/project1')
     expect(output).toContain('Port: 8081, PID: 12346, IDE: Cursor, Workspaces: /path/to/project2')
   })
@@ -75,7 +75,7 @@ describe('CLI sessions command', () => {
       env: { ...process.env, NODE_ENV: 'test' },
     })
 
-    expect(output).toContain('Found 1 Claude Code session:')
+    expect(output).toContain('Found 1 Claude Code session (current project context):')
     expect(output).toContain('Port: 8080, PID: 12345, IDE: Cursor, Workspaces: /valid/project')
   })
 

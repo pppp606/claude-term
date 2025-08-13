@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander'
-import { listSessions } from './session-discovery.js'
+import { listSessions, listAllSessions } from './session-discovery.js'
 import { connectCommand } from './connect.js'
 import { fileURLToPath } from 'url'
 
@@ -14,19 +14,27 @@ program
 
 program
   .command('sessions')
-  .description('List available Claude Code sessions')
+  .description('List Claude Code sessions (prioritizes current project)')
   .option(
     '--lock-dir <path>',
     'Directory to scan for lock files (default: auto-detect)',
   )
-  .action((options: { lockDir?: string }) => {
-    const sessions = listSessions(options.lockDir)
+  .option(
+    '--all',
+    'Show all sessions from all projects',
+  )
+  .action((options: { lockDir?: string; all?: boolean }) => {
+    const sessions = options.all ? listAllSessions() : listSessions(options.lockDir)
 
     if (sessions.length === 0) {
       console.log('No Claude Code sessions found.')
+      if (!options.all && !options.lockDir) {
+        console.log('Tip: Use --all to see sessions from all projects')
+      }
     } else {
       const sessionText = sessions.length === 1 ? 'session' : 'sessions'
-      console.log(`Found ${sessions.length} Claude Code ${sessionText}:`)
+      const contextText = options.all ? 'all projects' : 'current project context'
+      console.log(`Found ${sessions.length} Claude Code ${sessionText} (${contextText}):`)
 
       sessions.forEach((session) => {
         const workspaces =
@@ -40,10 +48,10 @@ program
 
 program
   .command('connect')
-  .description('Connect to a Claude Code MCP server interactively')
+  .description('Connect to a Claude Code MCP server (auto-connects if single session in current project)')
   .option(
     '--lock-dir <path>',
-    'Directory to scan for lock files (default: auto-detect)',
+    'Directory to scan for lock files (default: current project auto-detect)',
   )
   .action(async (options: { lockDir?: string }) => {
     await connectCommand(options)
