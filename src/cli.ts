@@ -4,8 +4,6 @@ import { Command } from 'commander'
 import { listSessions } from './session-discovery.js'
 import { connectCommand } from './connect.js'
 import { fileURLToPath } from 'url'
-import os from 'os'
-import path from 'path'
 
 const program = new Command()
 
@@ -19,10 +17,9 @@ program
   .description('List available Claude Code sessions')
   .option(
     '--lock-dir <path>',
-    'Directory to scan for lock files',
-    path.join(os.homedir(), '.claude', 'ide'),
+    'Directory to scan for lock files (default: auto-detect)',
   )
-  .action((options: { lockDir: string }) => {
+  .action((options: { lockDir?: string }) => {
     const sessions = listSessions(options.lockDir)
 
     if (sessions.length === 0) {
@@ -46,10 +43,9 @@ program
   .description('Connect to a Claude Code MCP server interactively')
   .option(
     '--lock-dir <path>',
-    'Directory to scan for lock files',
-    path.join(os.homedir(), '.claude', 'ide'),
+    'Directory to scan for lock files (default: auto-detect)',
   )
-  .action(async (options: { lockDir: string }) => {
+  .action(async (options: { lockDir?: string }) => {
     await connectCommand(options)
   })
 

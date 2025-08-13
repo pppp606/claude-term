@@ -5,7 +5,7 @@ import readline from 'readline'
 import { WebSocket } from 'ws'
 
 export interface ConnectOptions {
-  lockDir: string
+  lockDir?: string
 }
 
 export async function connectCommand(options: ConnectOptions): Promise<void> {

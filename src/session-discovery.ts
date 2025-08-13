@@ -75,24 +75,48 @@ export function parseLockFile(lockPath: string): SessionInfo | null {
   }
 }
 
-const defaultLockDir = path.join(os.homedir(), '.claude', 'ide')
+// Removed unused defaultLockDir - now using auto-detection
 
-export function listSessions(lockDir: string = defaultLockDir): SessionInfo[] {
-  try {
-    if (!fs.existsSync(lockDir)) {
-      return []
+// Get all potential Claude lock directories
+function getClaudeLockDirectories(): string[] {
+  const claudeDir = path.join(os.homedir(), '.claude')
+  const potentialDirs = [
+    path.join(claudeDir, 'ide'),    // IDE connections
+    path.join(claudeDir, 'cli'),    // CLI direct connections  
+    claudeDir,                      // Root claude directory
+  ]
+  
+  return potentialDirs.filter(dir => {
+    try {
+      return fs.existsSync(dir) && fs.statSync(dir).isDirectory()
+    } catch {
+      return false
     }
+  })
+}
 
-    const files = fs.readdirSync(lockDir)
-    // Accept both claude-*.lock and *.lock files in Claude IDE directory
-    const lockFiles = files.filter((file) => file.endsWith('.lock'))
-
+export function listSessions(lockDir?: string): SessionInfo[] {
+  try {
+    // If specific directory provided, use only that
+    const dirsToSearch = lockDir ? [lockDir] : getClaudeLockDirectories()
+    
     const sessions: SessionInfo[] = []
-    for (const lockFile of lockFiles) {
-      const lockPath = path.join(lockDir, lockFile)
-      const sessionInfo = parseLockFile(lockPath)
-      if (sessionInfo) {
-        sessions.push(sessionInfo)
+    
+    for (const dir of dirsToSearch) {
+      if (!fs.existsSync(dir)) {
+        continue
+      }
+
+      const files = fs.readdirSync(dir)
+      // Accept both claude-*.lock and *.lock files
+      const lockFiles = files.filter((file) => file.endsWith('.lock'))
+
+      for (const lockFile of lockFiles) {
+        const lockPath = path.join(dir, lockFile)
+        const sessionInfo = parseLockFile(lockPath)
+        if (sessionInfo) {
+          sessions.push(sessionInfo)
+        }
       }
     }
 
