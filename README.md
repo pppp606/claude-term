@@ -81,24 +81,25 @@ Select your `claude-term-myproject` from the list and start coding!
 
 3. **Interactive Commands** (once connected):
 ```bash
-# Browse and send files interactively
-/browse
+# 💬 Prompt Commands - NEW!
+/prompt What does this code do?
+/ask How can I optimize this function?
+/context src/app.js README.md Please review these files for bugs
 
-# Send specific files to Claude
-/send src/app.js
-/send README.md
+# 📋 Template Commands - NEW!
+/template code_review
+/template explain_error error="TypeError: Cannot read property 'length'"
+/templates
 
-# Display files with syntax highlighting  
-/cat config.json
+# 📁 File Operations
+/browse    # Interactive file picker with preview
+/send src/app.js    # Send specific files to Claude
+/cat config.json    # Display files with syntax highlighting  
 
-# Search code with ripgrep
-/search "function.*authenticate"
-
-# View active files (resources)
-/active
-
-# Get help
-/help
+# 🔍 Search & Discovery
+/search "function.*authenticate"    # ripgrep-powered code search
+/help      # Show all available commands
+/quit      # Exit the session
 ```
 
 ## Features
@@ -118,12 +119,32 @@ Select your `claude-term-myproject` from the list and start coding!
 - **Syntax Highlighting**: bat-powered code display with `--color=always`
 
 #### Interactive Commands
+**New Prompt System:**
+- **`/prompt <message>`**: Send prompts/questions directly to Claude
+- **`/ask <message>`**: Alias for `/prompt` for natural interaction
+- **`/context <files...> <message>`**: Send prompts with file context
+- **`/template <name> [params...]`**: Use predefined prompt templates
+- **`/templates`**: List available templates
+
+**File Operations:**
 - **`/send <path>`**: Send files directly to Claude Code
 - **`/browse`**: Interactive file picker with preview
 - **`/cat <path>`**: Display files with syntax highlighting
 - **`/search <pattern>`**: ripgrep-powered code search  
-- **`/active`**: View active files (resources)
-- **Tab Completion**: Smart command and file path completion
+
+**System:**
+- **`/help`**: Show all available commands
+- **`/quit`**: Exit the interactive session
+
+#### Prompt Templates System
+- **Built-in Templates**: Pre-configured prompts for common tasks
+  - `code_review`: Comprehensive code review with best practices
+  - `explain_error`: Debug and understand error messages
+  - `optimize`: Performance and efficiency optimization suggestions  
+  - `explain_code`: Detailed code explanation with examples
+- **Parameter Substitution**: Dynamic template customization with `{param}` syntax
+- **Markdown-based**: Easy template creation and modification
+- **Auto-discovery**: Templates loaded from `docs/prompt-templates/`
 
 #### Diff & Display
 - **Delta Integration**: Beautiful diff rendering with Dracula theme
@@ -201,10 +222,14 @@ CLAUDE_TERM_DEBUG=1 node dist/cli.js start --name debug-test
 claude
 # Then /ide and select test-ide
 
-# Test file sending
+# Test file sending and prompt features
 # (once connected in interactive session)
 /send package.json
 /browse
+/prompt What's the purpose of this project?
+/context package.json README.md Please review this project structure
+/template code_review
+/templates
 ```
 
 ## Comparison with Traditional IDEs
@@ -238,8 +263,14 @@ rm ~/.claude/ide/{port}.lock
 ### File Sending Issues  
 - Ensure Claude Code is connected (you see the interactive prompt `>`)
 - Check that files exist before sending: `ls path/to/file`
-- Use `/active` to see which files Claude can access
-- Try `/browse` for interactive file selection with preview
+- Use `/browse` for interactive file selection with preview
+
+### Prompt Sending Issues
+- Verify WebSocket connection is established (no connection errors)
+- Check that templates are loaded (you see "Loaded X templates" message)
+- Use `/templates` to list available templates
+- Test basic prompts first: `/prompt Hello Claude`
+- For context prompts, ensure files exist before including them
 
 ### CLI Tool Dependencies (Optional)
 ```bash

@@ -126,9 +126,9 @@ export class TemplateManager {
       for (const param of template.parameters) {
         usage += `  {${param}}\n`
       }
-      usage += '\nUsage: :template ' + templateName + ' param1=value1 param2=value2'
+      usage += '\nUsage: /template ' + templateName + ' param1=value1 param2=value2'
     } else {
-      usage += '\nUsage: :template ' + templateName
+      usage += '\nUsage: /template ' + templateName
     }
 
     return usage

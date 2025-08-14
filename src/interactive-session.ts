@@ -161,8 +161,8 @@ export class InteractiveSession extends EventEmitter {
     // Parse arguments: files come first, message is the last part
     const parts = args.split(' ')
     if (parts.length < 2) {
-      console.log('Usage: :context <files...> <message>')
-      console.log('Example: :context src/main.ts src/utils.ts Please review these files')
+      console.log('Usage: /context <files...> <message>')
+      console.log('Example: /context src/main.ts src/utils.ts Please review these files')
       return
     }
 
@@ -185,7 +185,7 @@ export class InteractiveSession extends EventEmitter {
     const message = parts.slice(messageStartIndex).join(' ')
 
     if (filePaths.length === 0 || !message) {
-      console.log('Usage: :context <files...> <message>')
+      console.log('Usage: /context <files...> <message>')
       return
     }
 
@@ -203,8 +203,8 @@ export class InteractiveSession extends EventEmitter {
   public handleTemplateCommand(args: string): void {
     const parts = args.split(' ')
     if (parts.length === 0) {
-      console.log('Usage: :template <name> [param1=value1] [param2=value2]')
-      console.log('Use :templates to list available templates')
+      console.log('Usage: /template <name> [param1=value1] [param2=value2]')
+      console.log('Use /templates to list available templates')
       return
     }
 
@@ -216,14 +216,14 @@ export class InteractiveSession extends EventEmitter {
       if (usage) {
         console.log(usage)
       } else {
-        console.log(`Template '${templateName}' not found. Use :templates to list available templates.`)
+        console.log(`Template '${templateName}' not found. Use /templates to list available templates.`)
       }
       return
     }
 
     const template = this.templateManager.getTemplate(templateName)
     if (!template) {
-      console.log(`Template '${templateName}' not found. Use :templates to list available templates.`)
+      console.log(`Template '${templateName}' not found. Use /templates to list available templates.`)
       return
     }
 
@@ -270,7 +270,7 @@ export class InteractiveSession extends EventEmitter {
         console.log(`    Parameters: {${template.parameters.join('}, {')})}`)
       }
     }
-    console.log('\nUsage: :template <name> [params...] or :template <name> for details')
+    console.log('\nUsage: /template <name> [params...] or /template <name> for details')
   }
 
   public async sendFile(filePath: string): Promise<void> {
@@ -296,62 +296,62 @@ export class InteractiveSession extends EventEmitter {
   public processCommand(command: string): void {
     const trimmed = command.trim()
 
-    if (trimmed === ':help') {
+    if (trimmed === '/help') {
       console.log('Available commands:')
-      console.log('  :prompt <message> - Send prompt/message to Claude')
-      console.log('  :ask <message> - Alias for :prompt')
-      console.log('  :context <files...> <message> - Send prompt with file context')
-      console.log('  :template <name> [params...] - Use a predefined template')
-      console.log('  :templates - List available templates')
-      console.log('  :send <path> - Send file content to Claude')
-      console.log('  :browse - Browse files with fzf (interactive file picker)')
-      console.log('  :cat <path> - Display file with syntax highlighting (bat)')
-      console.log('  :search <pattern> - Search code with ripgrep')
-      console.log('  :help - Show this help message')
-      console.log('  :quit - Exit the session')
-    } else if (trimmed === ':quit') {
+      console.log('  /prompt <message> - Send prompt/message to Claude')
+      console.log('  /ask <message> - Alias for /prompt')
+      console.log('  /context <files...> <message> - Send prompt with file context')
+      console.log('  /template <name> [params...] - Use a predefined template')
+      console.log('  /templates - List available templates')
+      console.log('  /send <path> - Send file content to Claude')
+      console.log('  /browse - Browse files with fzf (interactive file picker)')
+      console.log('  /cat <path> - Display file with syntax highlighting (bat)')
+      console.log('  /search <pattern> - Search code with ripgrep')
+      console.log('  /help - Show this help message')
+      console.log('  /quit - Exit the session')
+    } else if (trimmed === '/quit') {
       this.emit('quit')
-    } else if (trimmed.startsWith(':prompt ') || trimmed.startsWith(':ask ')) {
-      const message = trimmed.startsWith(':prompt ') 
+    } else if (trimmed.startsWith('/prompt ') || trimmed.startsWith('/ask ')) {
+      const message = trimmed.startsWith('/prompt ') 
         ? trimmed.substring(8).trim() 
         : trimmed.substring(5).trim()
       if (message) {
         this.sendPrompt(message)
       } else {
-        console.log('Usage: :prompt <message> or :ask <message>')
+        console.log('Usage: /prompt <message> or /ask <message>')
       }
-    } else if (trimmed.startsWith(':context ')) {
+    } else if (trimmed.startsWith('/context ')) {
       this.handleContextCommand(trimmed.substring(9).trim())
-    } else if (trimmed.startsWith(':template ')) {
+    } else if (trimmed.startsWith('/template ')) {
       this.handleTemplateCommand(trimmed.substring(10).trim())
-    } else if (trimmed === ':templates') {
+    } else if (trimmed === '/templates') {
       this.listTemplates()
-    } else if (trimmed.startsWith(':send ')) {
+    } else if (trimmed.startsWith('/send ')) {
       const filePath = trimmed.substring(6).trim()
       if (filePath) {
         this.sendFile(filePath)
       } else {
-        console.log('Usage: :send <path>')
+        console.log('Usage: /send <path>')
       }
-    } else if (trimmed === ':browse') {
+    } else if (trimmed === '/browse') {
       this.browseFiles()
-    } else if (trimmed.startsWith(':cat ')) {
+    } else if (trimmed.startsWith('/cat ')) {
       const filePath = trimmed.substring(5).trim()
       if (filePath) {
         this.displayFile(filePath)
       } else {
-        console.log('Usage: :cat <path>')
+        console.log('Usage: /cat <path>')
       }
-    } else if (trimmed.startsWith(':search ')) {
+    } else if (trimmed.startsWith('/search ')) {
       const pattern = trimmed.substring(8).trim()
       if (pattern) {
         this.searchCode(pattern)
       } else {
-        console.log('Usage: :search <pattern>')
+        console.log('Usage: /search <pattern>')
       }
-    } else if (trimmed.startsWith(':')) {
+    } else if (trimmed.startsWith('/')) {
       console.log(`Unknown command: ${trimmed}`)
-      console.log('Type :help for available commands')
+      console.log('Type /help for available commands')
     }
     // Ignore non-command input for now
   }
@@ -438,7 +438,7 @@ export class InteractiveSession extends EventEmitter {
 
   public startEventLoop(): void {
     console.log('\n🔄 Interactive session started')
-    console.log('Type :help for available commands')
+    console.log('Type /help for available commands')
     console.log('Waiting for events from Claude Code...\n')
 
     // Set up stdin for interactive commands
