@@ -16,7 +16,7 @@ Instead of using Claude Code through IDEs like VSCode or Cursor, `claude-term` a
 ```
 ┌─────────────┐    WebSocket/MCP    ┌──────────────┐
 │   Claude    │ ◄─────────────────► │ claude-term  │
-│   Code      │   at_mentioned      │ IDE Server   │
+│   Code      │   selection_changed │ IDE Server   │
 └─────────────┘   file sharing      └──────────────┘
                                            │
                                            ▼
@@ -28,9 +28,10 @@ Instead of using Claude Code through IDEs like VSCode or Cursor, `claude-term` a
 ```
 
 **Key Features:**
-- Bidirectional MCP (Model Context Protocol) communication
-- File sharing via `at_mentioned` events  
-- Interactive terminal commands with CLI tool integration
+- **Interactive Line Selection**: Select specific lines with fzf and send directly to Claude
+- **File Sharing**: Send complete files via `at_mentioned` events  
+- **Bidirectional MCP**: Full Model Context Protocol communication
+- **CLI Tool Integration**: Native fzf, bat, delta, and ripgrep integration
 
 ## Quick Start
 
@@ -81,81 +82,69 @@ Select your `claude-term-myproject` from the list and start coding!
 
 3. **Interactive Commands** (once connected):
 ```bash
-# 💬 Prompt Commands - NEW!
-/prompt What does this code do?
-/ask How can I optimize this function?
-/context src/app.js README.md Please review these files for bugs
-
-# 📋 Template Commands - NEW!
-/template code_review
-/template explain_error error="TypeError: Cannot read property 'length'"
-/templates
-
 # 📁 File Operations
-/browse    # Interactive file picker with preview
-/send src/app.js    # Send specific files to Claude
-/cat config.json    # Display files with syntax highlighting  
+/browse    # Interactive file picker with fzf
+/cat src/app.js    # Interactive line selector - select and send specific lines!
+/send src/app.js    # Send complete files to Claude
 
 # 🔍 Search & Discovery
 /search "function.*authenticate"    # ripgrep-powered code search
+/active    # Show files Claude can access
 /help      # Show all available commands
 /quit      # Exit the session
 ```
 
+## Key Feature: Interactive Line Selection
+
+The standout feature of `claude-term` is **interactive line selection** with fzf:
+
+```bash
+# Open any file with the interactive selector
+/cat src/components/Header.js
+```
+
+**What happens:**
+1. 📄 **File opens in fzf** with numbered lines
+2. 🎯 **Navigate** with ↑↓ arrows or j/k
+3. ⭐ **Select lines** with Tab (multi-select supported)
+4. 📤 **Send to Claude** with Enter - selected lines sent via `selection_changed` event
+
+**Perfect for:**
+- Asking Claude to explain specific code sections
+- Getting suggestions for particular functions
+- Debugging specific line ranges
+- Code reviews on targeted areas
+
 ## Features
 
-### Current Features ✅
-
-#### Core IDE Server
+### Core IDE Server ✅
 - **WebSocket MCP Server**: Full Model Context Protocol compatibility
 - **Auto-naming**: IDE names based on directory (`claude-term-{dirname}`)
 - **Duplicate Detection**: Prevents multiple servers with same name
 - **Authentication**: WebSocket header-based authentication support
 
-#### File Operations & Sharing
-- **File Sending**: Send files to Claude via `at_mentioned` events 
+### Interactive Line Selection ✅ 
+- **fzf Integration**: Beautiful, fast fuzzy-finding interface
+- **Multi-line Selection**: Select multiple lines with Tab
+- **Real-time Sending**: Selected lines sent immediately via `selection_changed`
+- **Context Preservation**: Full file content included for context
+- **Graceful Fallbacks**: Works without fzf (basic prompt fallback)
+
+### File Operations & Sharing ✅
+- **File Sending**: Send complete files via `at_mentioned` events 
 - **Resource Management**: Active file tracking for Claude access
 - **Interactive File Browser**: fzf integration for file selection
-- **Syntax Highlighting**: bat-powered code display with `--color=always`
+- **Syntax Highlighting**: bat-powered code display
 
-#### Interactive Commands
-**New Prompt System:**
-- **`/prompt <message>`**: Send prompts/questions directly to Claude
-- **`/ask <message>`**: Alias for `/prompt` for natural interaction
-- **`/context <files...> <message>`**: Send prompts with file context
-- **`/template <name> [params...]`**: Use predefined prompt templates
-- **`/templates`**: List available templates
+### Search & Discovery ✅
+- **ripgrep Integration**: Fast, powerful code search
+- **Interactive Results**: Search results with context
+- **Pattern Matching**: Full regex support
 
-**File Operations:**
-- **`/send <path>`**: Send files directly to Claude Code
-- **`/browse`**: Interactive file picker with preview
-- **`/cat <path>`**: Display files with syntax highlighting
-- **`/search <pattern>`**: ripgrep-powered code search  
-
-**System:**
-- **`/help`**: Show all available commands
-- **`/quit`**: Exit the interactive session
-
-#### Prompt Templates System
-- **Built-in Templates**: Pre-configured prompts for common tasks
-  - `code_review`: Comprehensive code review with best practices
-  - `explain_error`: Debug and understand error messages
-  - `optimize`: Performance and efficiency optimization suggestions  
-  - `explain_code`: Detailed code explanation with examples
-- **Parameter Substitution**: Dynamic template customization with `{param}` syntax
-- **Markdown-based**: Easy template creation and modification
-- **Auto-discovery**: Templates loaded from `docs/prompt-templates/`
-
-#### Diff & Display
-- **Delta Integration**: Beautiful diff rendering with Dracula theme
-- **File Change Detection**: Automatic diff display for file modifications
+### Diff & Display ✅
+- **Delta Integration**: Beautiful diff rendering
+- **File Change Detection**: Automatic diff display for modifications
 - **Multiple Fallbacks**: Graceful degradation (delta → diff → cat)
-
-### Planned Features 🚧
-- **Line Range Selection**: Send specific line ranges with `at_mentioned`
-- **Selection Events**: `selection_changed` event implementation
-- **Enhanced Search**: Multi-line pattern support
-- **Custom Themes**: Configurable color schemes
 
 ## Command Line Options
 
@@ -213,14 +202,11 @@ CLAUDE_TERM_DEBUG=1 node dist/cli.js start --name debug-test
 claude
 # Then /ide and select test-ide
 
-# Test file sending and prompt features
-# (once connected in interactive session)
-/send package.json
-/browse
-/prompt What's the purpose of this project?
-/context package.json README.md Please review this project structure
-/template code_review
-/templates
+# Test core features (once connected)
+/send package.json           # File sharing
+/browse                     # File browser
+/cat src/main.js            # Interactive line selection ⭐
+/search "export.*function"  # Code search
 ```
 
 ## Comparison with Traditional IDEs
@@ -232,6 +218,27 @@ claude
 | **Customization** | IDE-specific | Your terminal, your rules |
 | **Remote Work** | X11/VNC required | SSH-friendly |
 | **Integration** | IDE extensions | Native CLI tools |
+| **Line Selection** | Mouse/keyboard in GUI | fzf-powered terminal interface |
+
+## CLI Tool Dependencies (Recommended)
+
+```bash
+# For the best experience, install these tools:
+
+# Interactive file selection and line picker
+brew install fzf
+
+# Syntax highlighting  
+brew install bat
+
+# Beautiful diffs
+brew install git-delta
+
+# Fast search
+brew install ripgrep
+```
+
+**Without these tools**, claude-term gracefully falls back to basic alternatives, but the experience is significantly enhanced with them.
 
 ## Troubleshooting
 
@@ -251,35 +258,16 @@ rm ~/.claude/ide/{port}.lock
 - Verify the workspace path is correct
 - Try debug mode: `CLAUDE_TERM_DEBUG=1 node dist/cli.js start`
 
+### Line Selection Issues
+- Ensure `fzf` is installed: `brew install fzf`
+- Check that files exist before opening with `/cat`
+- Use `/browse` for guided file selection if needed
+- Try basic selection without fzf as fallback
+
 ### File Sending Issues  
 - Ensure Claude Code is connected (you see the interactive prompt `>`)
 - Check that files exist before sending: `ls path/to/file`
 - Use `/browse` for interactive file selection with preview
-
-### Prompt Sending Issues
-- Verify WebSocket connection is established (no connection errors)
-- Check that templates are loaded (you see "Loaded X templates" message)
-- Use `/templates` to list available templates
-- Test basic prompts first: `/prompt Hello Claude`
-- For context prompts, ensure files exist before including them
-
-### CLI Tool Dependencies (Optional)
-```bash
-# For enhanced experience, install these tools:
-# File browsing
-brew install fzf
-
-# Syntax highlighting  
-brew install bat
-
-# Beautiful diffs
-brew install git-delta
-
-# Fast search
-brew install ripgrep
-```
-
-Without these tools, claude-term will gracefully fall back to basic alternatives.
 
 ## Contributing
 

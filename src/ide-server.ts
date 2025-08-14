@@ -7,8 +7,6 @@ import os from 'os'
 import { randomUUID } from 'crypto'
 import { execSync } from 'child_process'
 import * as readline from 'readline'
-import { PromptSender } from './prompt-sender.js'
-import { TemplateManager } from './template-manager.js'
 
 export interface IDEServerOptions {
   port?: number
@@ -23,12 +21,9 @@ export class ClaudeTermIDEServer {
   private authToken: string = ''
   private connectedWS: WebSocket | null = null
   private rl: readline.Interface | null = null
-  private promptSender: PromptSender | null = null
-  private templateManager: TemplateManager
 
   constructor(private options: IDEServerOptions = {}) {
     this.authToken = randomUUID()
-    this.templateManager = new TemplateManager()
   }
 
   async start(): Promise<number> {
@@ -103,8 +98,6 @@ export class ClaudeTermIDEServer {
 
     console.log('Claude Code connected!')
     this.connectedWS = ws
-    this.promptSender = new PromptSender(ws)
-    this.setupPromptHandlers()
 
     // Start interactive session
     this.startInteractiveSession()
@@ -132,11 +125,6 @@ export class ClaudeTermIDEServer {
           this.handleToolCall(ws, message)
         } else if (message.method?.startsWith('resources/')) {
           this.handleResourceCall(ws, message)
-        } else if (message.method === 'claude/promptResponse' || message.method === 'claude/sendPrompt') {
-          // Handle prompt responses
-          if (this.promptSender) {
-            this.promptSender.handleResponse(message as any)
-          }
         } else {
           // Default response for unknown methods
           const response = {
@@ -160,24 +148,6 @@ export class ClaudeTermIDEServer {
     })
   }
 
-  private setupPromptHandlers(): void {
-    if (!this.promptSender) return
-
-    this.promptSender.on('promptResponse', (result) => {
-      console.log('\n✨ Claude responded:')
-      console.log(result.response)
-      if (result.conversationId) {
-        console.log(`\n🔗 Conversation ID: ${result.conversationId}`)
-      }
-      console.log('')
-    })
-
-    this.promptSender.on('promptError', (error) => {
-      console.error('\n❌ Error from Claude:')
-      console.error(`${error.message} (Code: ${error.code})`)
-      console.log('')
-    })
-  }
 
   private handleInitialize(ws: WebSocket, message: any): void {
     const response = {
@@ -566,11 +536,6 @@ export class ClaudeTermIDEServer {
   private completeCommand(line: string): [string[], string] {
     const commands = [
       '/help',
-      '/prompt ',
-      '/ask ',
-      '/context ',
-      '/template ',
-      '/templates',
       '/send ',
       '/browse',
       '/cat ',
@@ -631,11 +596,6 @@ export class ClaudeTermIDEServer {
 
     if (trimmed === '/help') {
       console.log('Available commands:')
-      console.log('  /prompt <message> - Send prompt/message to Claude')
-      console.log('  /ask <message> - Alias for /prompt')
-      console.log('  /context <files...> <message> - Send prompt with file context')
-      console.log('  /template <name> [params...] - Use a predefined template')
-      console.log('  /templates - List available templates')
       console.log('  /send <path> - Send file to Claude directly')
       console.log('  /browse - Browse and interact with files (recommended)')
       console.log('  /cat <path> - Display file interactively, select text to send to Claude')
@@ -675,21 +635,6 @@ export class ClaudeTermIDEServer {
       } else {
         console.log('Usage: /send <path>')
       }
-    } else if (trimmed.startsWith('/prompt ') || trimmed.startsWith('/ask ')) {
-      const message = trimmed.startsWith('/prompt ') 
-        ? trimmed.substring(8).trim() 
-        : trimmed.substring(5).trim()
-      if (message) {
-        this.sendPrompt(message)
-      } else {
-        console.log('Usage: /prompt <message> or /ask <message>')
-      }
-    } else if (trimmed.startsWith('/context ')) {
-      this.handleContextCommand(trimmed.substring(9).trim())
-    } else if (trimmed.startsWith('/template ')) {
-      this.handleTemplateCommand(trimmed.substring(10).trim())
-    } else if (trimmed === '/templates') {
-      this.listTemplates()
     } else if (trimmed.startsWith('/')) {
       console.log(`Unknown command: ${trimmed}`)
       console.log('Type /help for available commands')
@@ -912,137 +857,6 @@ export class ClaudeTermIDEServer {
       fs.unlinkSync(this.lockFilePath)
       console.log(`Lock file removed: ${this.lockFilePath}`)
     }
-  }
-  // New prompt sending methods
-  private sendPrompt(message: string): void {
-    try {
-      if (!this.promptSender) {
-        console.log('❌ Prompt sender not initialized')
-        return
-      }
-      console.log(`\n📤 Sending prompt to Claude: "${message}"`)
-      this.promptSender.sendPrompt(message)
-    } catch (error) {
-      console.error('Error sending prompt:', error)
-    }
-  }
-
-  private handleContextCommand(args: string): void {
-    const parts = args.split(' ')
-    if (parts.length < 2) {
-      console.log('Usage: /context <files...> <message>')
-      console.log('Example: /context src/main.ts src/utils.ts Please review these files')
-      return
-    }
-
-    // Find where the message starts (look for the first non-file-like argument)
-    let messageStartIndex = -1
-    for (let i = 0; i < parts.length; i++) {
-      if (!parts[i].includes('.') && !parts[i].startsWith('./') && !parts[i].startsWith('/')) {
-        messageStartIndex = i
-        break
-      }
-    }
-
-    if (messageStartIndex === -1) {
-      messageStartIndex = parts.length - 1
-    }
-
-    const filePaths = parts.slice(0, messageStartIndex)
-    const message = parts.slice(messageStartIndex).join(' ')
-
-    if (filePaths.length === 0 || !message) {
-      console.log('Usage: /context <files...> <message>')
-      return
-    }
-
-    try {
-      if (!this.promptSender) {
-        console.log('❌ Prompt sender not initialized')
-        return
-      }
-      console.log(`\n📤 Sending prompt with context: "${message}"`)
-      console.log(`📁 Including files: ${filePaths.join(', ')}`)
-      
-      const context = this.promptSender.gatherFileContext(filePaths)
-      this.promptSender.sendPrompt(message, context)
-    } catch (error) {
-      console.error('Error sending contextual prompt:', error)
-    }
-  }
-
-  private handleTemplateCommand(args: string): void {
-    const parts = args.split(' ')
-    if (parts.length === 0) {
-      console.log('Usage: /template <name> [param1=value1] [param2=value2]')
-      console.log('Use /templates to list available templates')
-      return
-    }
-
-    const templateName = parts[0]
-    
-    if (parts.length === 1) {
-      const usage = this.templateManager.getTemplateUsage(templateName)
-      if (usage) {
-        console.log(usage)
-      } else {
-        console.log(`Template '${templateName}' not found. Use /templates to list available templates.`)
-      }
-      return
-    }
-
-    const template = this.templateManager.getTemplate(templateName)
-    if (!template) {
-      console.log(`Template '${templateName}' not found. Use /templates to list available templates.`)
-      return
-    }
-
-    const parameters: Record<string, string> = {}
-    for (let i = 1; i < parts.length; i++) {
-      const part = parts[i]
-      if (part.includes('=')) {
-        const [key, ...valueParts] = part.split('=')
-        parameters[key] = valueParts.join('=')
-      } else {
-        const paramNames = template.parameters || []
-        const paramIndex = i - 1
-        if (paramIndex < paramNames.length) {
-          parameters[paramNames[paramIndex]] = part
-        }
-      }
-    }
-
-    try {
-      if (!this.promptSender) {
-        console.log('❌ Prompt sender not initialized')
-        return
-      }
-      const promptMessage = this.templateManager.substituteParameters(template, parameters)
-      console.log(`\n📋 Using template: ${templateName}`)
-      console.log(`📤 Generated prompt: "${promptMessage.substring(0, 100)}${promptMessage.length > 100 ? '...' : ''}"`)
-      
-      this.promptSender.sendPrompt(promptMessage, undefined, templateName)
-    } catch (error) {
-      console.error('Error using template:', error)
-    }
-  }
-
-  private listTemplates(): void {
-    const templates = this.templateManager.listTemplates()
-    
-    if (templates.length === 0) {
-      console.log('No templates found. Templates should be placed in docs/prompt-templates/')
-      return
-    }
-
-    console.log('\nAvailable templates:')
-    for (const template of templates) {
-      console.log(`  ${template.name} - ${template.description}`)
-      if (template.parameters && template.parameters.length > 0) {
-        console.log(`    Parameters: {${template.parameters.join('}, {')})}`)
-      }
-    }
-    console.log('\nUsage: /template <name> [params...] or /template <name> for details')
   }
 
   // Interactive file selection methods
