@@ -168,15 +168,6 @@ node dist/cli.js start --name my-ide-server
 node dist/cli.js start --port 8080  
 node dist/cli.js start --workspace /path/to/project
 
-# List available Claude Code sessions
-node dist/cli.js sessions
-
-# Connect to existing session (interactive mode)
-node dist/cli.js connect
-
-# Connect to specific session
-node dist/cli.js connect --port 8080
-
 # Enable debug logging
 CLAUDE_TERM_DEBUG=1 node dist/cli.js start --name debug-session
 ```

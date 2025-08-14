@@ -7,6 +7,8 @@ import os from 'os'
 import { randomUUID } from 'crypto'
 import { execSync } from 'child_process'
 import * as readline from 'readline'
+import { PromptSender } from './prompt-sender.js'
+import { TemplateManager } from './template-manager.js'
 
 export interface IDEServerOptions {
   port?: number
@@ -21,9 +23,12 @@ export class ClaudeTermIDEServer {
   private authToken: string = ''
   private connectedWS: WebSocket | null = null
   private rl: readline.Interface | null = null
+  private promptSender: PromptSender | null = null
+  private templateManager: TemplateManager
 
   constructor(private options: IDEServerOptions = {}) {
     this.authToken = randomUUID()
+    this.templateManager = new TemplateManager()
   }
 
   async start(): Promise<number> {
@@ -89,23 +94,25 @@ export class ClaudeTermIDEServer {
     // Check for authentication header
     const authHeader = request.headers['x-claude-code-ide-authorization']
     if (authHeader && authHeader !== this.authToken) {
-      console.log('⚠️  Authentication header provided but doesn\'t match')
+      console.log("⚠️  Authentication header provided but doesn't match")
     } else if (!authHeader) {
       console.log('ℹ️  No authentication header provided')
     } else {
       console.log('✅ Authentication header validated')
     }
-    
+
     console.log('Claude Code connected!')
     this.connectedWS = ws
-    
+    this.promptSender = new PromptSender(ws)
+    this.setupPromptHandlers()
+
     // Start interactive session
     this.startInteractiveSession()
 
     ws.on('message', (data: Buffer) => {
       try {
         const message = JSON.parse(data.toString())
-        
+
         // Log received messages (can be disabled in production)
         if (process.env.CLAUDE_TERM_DEBUG) {
           console.log('\n🔍 DEBUG: Received from Claude Code:')
@@ -125,6 +132,11 @@ export class ClaudeTermIDEServer {
           this.handleToolCall(ws, message)
         } else if (message.method?.startsWith('resources/')) {
           this.handleResourceCall(ws, message)
+        } else if (message.method === 'claude/promptResponse' || message.method === 'claude/sendPrompt') {
+          // Handle prompt responses
+          if (this.promptSender) {
+            this.promptSender.handleResponse(message as any)
+          }
         } else {
           // Default response for unknown methods
           const response = {
@@ -145,6 +157,25 @@ export class ClaudeTermIDEServer {
 
     ws.on('error', (error) => {
       console.error('🔥 WebSocket error:', error)
+    })
+  }
+
+  private setupPromptHandlers(): void {
+    if (!this.promptSender) return
+
+    this.promptSender.on('promptResponse', (result) => {
+      console.log('\n✨ Claude responded:')
+      console.log(result.response)
+      if (result.conversationId) {
+        console.log(`\n🔗 Conversation ID: ${result.conversationId}`)
+      }
+      console.log('')
+    })
+
+    this.promptSender.on('promptError', (error) => {
+      console.error('\n❌ Error from Claude:')
+      console.error(`${error.message} (Code: ${error.code})`)
+      console.log('')
     })
   }
 
@@ -281,7 +312,7 @@ export class ClaudeTermIDEServer {
         ],
       },
     }
-    
+
     ws.send(JSON.stringify(response))
     console.log('📋 Sent tools list to Claude Code')
   }
@@ -339,10 +370,10 @@ export class ClaudeTermIDEServer {
   private handleResourceCall(ws: WebSocket, message: any): void {
     const method = message.method
     const params = message.params || {}
-    
+
     try {
       let result: any
-      
+
       if (method === 'resources/list') {
         // List available resources
         result = this.listResources()
@@ -352,13 +383,13 @@ export class ClaudeTermIDEServer {
       } else {
         result = { resources: [] }
       }
-      
+
       const response = {
         jsonrpc: '2.0',
         id: message.id,
         result: result,
       }
-      
+
       ws.send(JSON.stringify(response))
     } catch (error) {
       const errorResponse = {
@@ -369,35 +400,37 @@ export class ClaudeTermIDEServer {
           message: error instanceof Error ? error.message : 'Unknown error',
         },
       }
-      
+
       ws.send(JSON.stringify(errorResponse))
     }
   }
-  
+
   private activeFiles: Set<string> = new Set()
-  
+
   private listResources(): any {
-    const resources = Array.from(this.activeFiles).map(filePath => ({
+    const resources = Array.from(this.activeFiles).map((filePath) => ({
       uri: `file://${filePath}`,
       name: path.basename(filePath),
       mimeType: 'text/plain',
-      description: `Active file: ${path.relative(this.options.workspaceFolder || process.cwd(), filePath)}`
+      description: `Active file: ${path.relative(this.options.workspaceFolder || process.cwd(), filePath)}`,
     }))
-    
+
     return { resources }
   }
-  
+
   private readResource(uri: string): any {
     try {
       const filePath = uri.replace('file://', '')
       const content = fs.readFileSync(filePath, 'utf8')
-      
+
       return {
-        contents: [{
-          uri: uri,
-          mimeType: 'text/plain',
-          text: content
-        }]
+        contents: [
+          {
+            uri: uri,
+            mimeType: 'text/plain',
+            text: content,
+          },
+        ],
       }
     } catch (error) {
       throw new Error(`Failed to read resource: ${uri}`)
@@ -426,9 +459,9 @@ export class ClaudeTermIDEServer {
   private writeFileWithDiff(filePath: string, newContent: string): string {
     const fs = require('fs')
     const path = require('path')
-    
+
     const fullPath = path.resolve(this.options.workspaceFolder || process.cwd(), filePath)
-    
+
     // Show diff if file exists
     if (fs.existsSync(fullPath)) {
       try {
@@ -440,59 +473,61 @@ export class ClaudeTermIDEServer {
     } else {
       console.log(`\n📝 Creating new file: ${filePath}`)
     }
-    
+
     fs.writeFileSync(fullPath, newContent)
     return `File written successfully: ${filePath}`
   }
 
   private displayDiff(filePath: string, originalContent: string, newContent: string): void {
     console.log(`\n📝 Changes to: ${filePath}`)
-    
+
     try {
       // Create temporary files for diff with proper extensions for syntax highlighting
       const tmpDir = os.tmpdir()
       const fileExt = path.extname(filePath) || '.txt'
       const originalFile = path.join(tmpDir, `claude-term-original-${randomUUID()}${fileExt}`)
       const modifiedFile = path.join(tmpDir, `claude-term-modified-${randomUUID()}${fileExt}`)
-      
+
       fs.writeFileSync(originalFile, originalContent)
       fs.writeFileSync(modifiedFile, newContent)
-      
+
       // Check if delta is available
       let hasDelta = false
       try {
         execSync('command -v delta', { stdio: 'ignore' })
         hasDelta = true
       } catch {}
-      
+
       if (hasDelta) {
         // Use delta (ignore exit code as it returns 1 for differences)
         try {
-          execSync(`delta --pager=never --syntax-theme=Dracula --no-gitconfig --file-style=omit --hunk-header-style=omit --keep-plus-minus-markers "${originalFile}" "${modifiedFile}"`, { 
-            stdio: 'inherit'
-          })
+          execSync(
+            `delta --pager=never --syntax-theme=Dracula --no-gitconfig --file-style=omit --hunk-header-style=omit --keep-plus-minus-markers "${originalFile}" "${modifiedFile}"`,
+            {
+              stdio: 'inherit',
+            },
+          )
         } catch {
           // Delta executed but returned non-zero exit code (normal for diffs)
         }
       } else {
         // Fall back to system diff
         try {
-          execSync(`diff -u "${originalFile}" "${modifiedFile}"`, { 
-            stdio: 'inherit' 
+          execSync(`diff -u "${originalFile}" "${modifiedFile}"`, {
+            stdio: 'inherit',
           })
         } catch {
           // diff also returns non-zero for differences, which is normal
         }
       }
-      
+
       // Clean up temp files
       fs.unlinkSync(originalFile)
       fs.unlinkSync(modifiedFile)
-      
     } catch (error) {
       console.error('Error creating diff:', error)
     }
-    
+
     console.log('')
   }
 
@@ -500,48 +535,52 @@ export class ClaudeTermIDEServer {
     console.log('\n🔄 Interactive IDE server session started')
     console.log('Type /help for available commands')
     console.log('Waiting for Claude Code requests...\n')
-    
+
     // Create readline interface with tab completion
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
       completer: this.completeCommand.bind(this),
-      prompt: '> '
+      prompt: '> ',
     })
-    
+
     this.rl.on('line', async (input) => {
       const trimmed = input.trim()
-      
+
       if (trimmed) {
         await this.processCommand(trimmed)
       }
-      
+
       this.rl?.prompt()
     })
-    
+
     this.rl.on('SIGINT', () => {
       this.stop()
       process.exit(0)
     })
-    
+
     // Show initial prompt
     this.rl.prompt()
   }
-  
+
   private completeCommand(line: string): [string[], string] {
     const commands = [
       '/help',
-      '/browse', 
-      '/search ',
-      '/cat ',
-      '/send ',
+      '/prompt ',
       '/ask ',
+      '/context ',
+      '/template ',
+      '/templates',
+      '/send ',
+      '/browse',
+      '/cat ',
+      '/search ',
       '/active',
-      '/quit'
+      '/quit',
     ]
-    
-    const hits = commands.filter(cmd => cmd.startsWith(line))
-    
+
+    const hits = commands.filter((cmd) => cmd.startsWith(line))
+
     // If we have file path completion for /cat or /send
     if (line.startsWith('/cat ') || line.startsWith('/send ')) {
       const parts = line.split(' ')
@@ -549,36 +588,37 @@ export class ClaudeTermIDEServer {
         const pathPrefix = parts.slice(1).join(' ')
         const fileHits = this.getFileCompletions(pathPrefix)
         const prefix = parts[0] + ' '
-        return [fileHits.map(f => prefix + f), line]
+        return [fileHits.map((f) => prefix + f), line]
       }
     }
-    
+
     return [hits.length ? hits : commands, line]
   }
-  
+
   private getFileCompletions(pathPrefix: string): string[] {
     try {
       const workspaceFolder = this.options.workspaceFolder || process.cwd()
       const fullPrefix = path.resolve(workspaceFolder, pathPrefix || '.')
       const dir = path.dirname(fullPrefix)
       const basename = path.basename(fullPrefix)
-      
+
       if (!fs.existsSync(dir)) {
         return []
       }
-      
-      const files = fs.readdirSync(dir)
-        .filter(file => {
+
+      const files = fs
+        .readdirSync(dir)
+        .filter((file) => {
           if (file.startsWith('.')) return false // Skip hidden files
           return file.startsWith(basename)
         })
-        .map(file => {
+        .map((file) => {
           const fullPath = path.join(dir, file)
           const relativePath = path.relative(workspaceFolder, fullPath)
           return fs.statSync(fullPath).isDirectory() ? relativePath + '/' : relativePath
         })
         .slice(0, 10) // Limit to 10 suggestions
-      
+
       return files
     } catch {
       return []
@@ -591,13 +631,16 @@ export class ClaudeTermIDEServer {
 
     if (trimmed === '/help') {
       console.log('Available commands:')
-      console.log('  /browse - Browse and interact with files (recommended)')
-      console.log('  /search <pattern> - Search code with ripgrep')
-      console.log('  /cat <path> - Display file directly')
+      console.log('  /prompt <message> - Send prompt/message to Claude')
+      console.log('  /ask <message> - Alias for /prompt')
+      console.log('  /context <files...> <message> - Send prompt with file context')
+      console.log('  /template <name> [params...] - Use a predefined template')
+      console.log('  /templates - List available templates')
       console.log('  /send <path> - Send file to Claude directly')
-      console.log('  /ask <prompt> - Send prompt to Claude (experimental)')
+      console.log('  /browse - Browse and interact with files (recommended)')
+      console.log('  /cat <path> - Display file directly')
+      console.log('  /search <pattern> - Search code with ripgrep')
       console.log('  /active - Show active files (resources)')
-      console.log('  /test-at-mentioned - Test at_mentioned event with test-file.js')
       console.log('  /help - Show this help message')
       console.log('  /quit - Stop the server and exit')
     } else if (trimmed === '/quit') {
@@ -631,24 +674,21 @@ export class ClaudeTermIDEServer {
       } else {
         console.log('Usage: /send <path>')
       }
-    } else if (trimmed.startsWith('/ask ')) {
-      const prompt = trimmed.substring(5).trim()
-      if (prompt && this.connectedWS) {
-        this.sendPromptToClaude(prompt)
-      } else if (!this.connectedWS) {
-        console.log('No Claude Code client connected')
+    } else if (trimmed.startsWith('/prompt ') || trimmed.startsWith('/ask ')) {
+      const message = trimmed.startsWith('/prompt ') 
+        ? trimmed.substring(8).trim() 
+        : trimmed.substring(5).trim()
+      if (message) {
+        this.sendPrompt(message)
       } else {
-        console.log('Usage: /ask <prompt>')
+        console.log('Usage: /prompt <message> or /ask <message>')
       }
-    } else if (trimmed === '/test-at-mentioned') {
-      // Test command to trigger at_mentioned event with test file
-      if (this.connectedWS) {
-        const testFilePath = path.resolve(process.cwd(), 'test-file.js')
-        console.log(`🧪 Testing at_mentioned event with: ${testFilePath}`)
-        this.sendFileToClient(testFilePath)
-      } else {
-        console.log('No Claude Code client connected')
-      }
+    } else if (trimmed.startsWith('/context ')) {
+      this.handleContextCommand(trimmed.substring(9).trim())
+    } else if (trimmed.startsWith('/template ')) {
+      this.handleTemplateCommand(trimmed.substring(10).trim())
+    } else if (trimmed === '/templates') {
+      this.listTemplates()
     } else if (trimmed.startsWith('/')) {
       console.log(`Unknown command: ${trimmed}`)
       console.log('Type /help for available commands')
@@ -658,22 +698,25 @@ export class ClaudeTermIDEServer {
   private async browseFiles(workspaceFolder: string): Promise<void> {
     try {
       console.log('\n📁 Browsing files with fzf...')
-      const selectedFile = execSync('find . -type f -not -path "./node_modules/*" -not -path "./.git/*" | fzf --preview="bat --color=always --style=header,grid --line-range :300 {}"', {
-        encoding: 'utf8',
-        stdio: ['inherit', 'pipe', 'inherit'],
-        cwd: workspaceFolder
-      }).trim()
-      
+      const selectedFile = execSync(
+        'find . -type f -not -path "./node_modules/*" -not -path "./.git/*" | fzf --preview="bat --color=always --style=header,grid --line-range :300 {}"',
+        {
+          encoding: 'utf8',
+          stdio: ['inherit', 'pipe', 'inherit'],
+          cwd: workspaceFolder,
+        },
+      ).trim()
+
       if (selectedFile) {
         console.log(`\n📋 Selected: ${selectedFile}`)
         console.log('Choose action:')
         console.log('1) View file (/cat)')
         console.log('2) Send to Claude (/send)')
         console.log('3) Cancel')
-        
+
         // Get user choice using readline
         const choice = await this.promptUser('Enter choice (1-3): ')
-        
+
         const fullPath = path.resolve(workspaceFolder, selectedFile)
         switch (choice) {
           case '1':
@@ -697,7 +740,7 @@ export class ClaudeTermIDEServer {
       console.log('Install fzf: brew install fzf (macOS) or apt install fzf (Ubuntu)')
     }
   }
-  
+
   private promptUser(question: string): Promise<string> {
     return new Promise((resolve) => {
       if (this.rl) {
@@ -712,7 +755,9 @@ export class ClaudeTermIDEServer {
     try {
       console.log(`\n📄 Displaying: ${filePath}`)
       try {
-        execSync(`bat --color=always --style=header,grid,numbers "${filePath}"`, { stdio: 'inherit' })
+        execSync(`bat --color=always --style=header,grid,numbers "${filePath}"`, {
+          stdio: 'inherit',
+        })
       } catch {
         try {
           execSync(`cat "${filePath}"`, { stdio: 'inherit' })
@@ -729,19 +774,24 @@ export class ClaudeTermIDEServer {
     try {
       console.log(`\n🔍 Searching for: ${pattern}`)
       try {
-        execSync(`rg --color=always --heading --line-number "${pattern}"`, { 
+        execSync(`rg --color=always --heading --line-number "${pattern}"`, {
           stdio: 'inherit',
-          cwd: workspaceFolder
+          cwd: workspaceFolder,
         })
       } catch {
         try {
-          execSync(`grep -r -n --color=always "${pattern}" . --exclude-dir=node_modules --exclude-dir=.git`, { 
-            stdio: 'inherit',
-            cwd: workspaceFolder
-          })
+          execSync(
+            `grep -r -n --color=always "${pattern}" . --exclude-dir=node_modules --exclude-dir=.git`,
+            {
+              stdio: 'inherit',
+              cwd: workspaceFolder,
+            },
+          )
         } catch {
           console.log('⚠️  No matches found or search tools unavailable')
-          console.log('Install ripgrep: brew install ripgrep (macOS) or apt install ripgrep (Ubuntu)')
+          console.log(
+            'Install ripgrep: brew install ripgrep (macOS) or apt install ripgrep (Ubuntu)',
+          )
         }
       }
     } catch (error) {
@@ -753,7 +803,7 @@ export class ClaudeTermIDEServer {
     const langMap: { [key: string]: string } = {
       '.ts': 'typescript',
       '.tsx': 'typescript',
-      '.js': 'javascript', 
+      '.js': 'javascript',
       '.jsx': 'javascript',
       '.py': 'python',
       '.md': 'markdown',
@@ -763,7 +813,7 @@ export class ClaudeTermIDEServer {
       '.html': 'html',
       '.css': 'css',
       '.scss': 'scss',
-      '.sh': 'bash'
+      '.sh': 'bash',
     }
     return langMap[ext] || 'text'
   }
@@ -782,73 +832,15 @@ export class ClaudeTermIDEServer {
     console.log('Claude Code can access these files via resources API\n')
   }
 
-  private sendPromptToClaude(prompt: string): void {
-    if (!this.connectedWS) {
-      console.log('❌ No Claude Code client connected')
-      return
-    }
-    
-    console.log(`\n💬 Sending prompt to Claude: "${prompt}"`)
-    
-    // Try different approaches to send a prompt
-    
-    // Approach 1: As a sampling request
-    const samplingRequest = {
-      jsonrpc: '2.0',
-      method: 'sampling/createMessage',
-      id: randomUUID(),
-      params: {
-        messages: [{
-          role: 'user',
-          content: prompt
-        }],
-        includeContext: 'all',
-        maxTokens: 2000
-      }
-    }
-    
-    // Approach 2: As a prompt request
-    const promptRequest = {
-      jsonrpc: '2.0',
-      method: 'prompts/get',
-      id: randomUUID(),
-      params: {
-        name: 'user_prompt',
-        arguments: {
-          prompt: prompt
-        }
-      }
-    }
-    
-    // Approach 3: As a tool result (pretending Claude asked for it)
-    const toolResult = {
-      jsonrpc: '2.0',
-      id: randomUUID(),
-      result: {
-        content: [{
-          type: 'text',
-          text: `User request: ${prompt}`
-        }]
-      }
-    }
-    
-    // Try all approaches
-    this.connectedWS.send(JSON.stringify(samplingRequest))
-    this.connectedWS.send(JSON.stringify(promptRequest))
-    this.connectedWS.send(JSON.stringify(toolResult))
-    
-    console.log('🔍 Tried 3 different prompt formats')
-    console.log('📝 Check if Claude responds to any of them')
-  }
 
   private sendFileToClient(filePath: string): void {
     try {
       const content = fs.readFileSync(filePath, 'utf8')
       const relativePath = path.relative(this.options.workspaceFolder || process.cwd(), filePath)
-      
+
       // Add file to active files list
       this.activeFiles.add(filePath)
-      
+
       // Send at_mentioned event to Claude Code
       if (this.connectedWS) {
         const atMentionedEvent = {
@@ -859,35 +851,35 @@ export class ClaudeTermIDEServer {
             // Optional: specify line range if needed
             // lineStart: 0,
             // lineEnd: content.split('\n').length - 1
-          }
+          },
         }
-        
+
         if (process.env.CLAUDE_TERM_DEBUG) {
           console.log('🔍 DEBUG: Sending at_mentioned event:')
           console.log(JSON.stringify(atMentionedEvent, null, 2))
         }
-        
+
         this.connectedWS.send(JSON.stringify(atMentionedEvent))
-        
+
         // Also notify that resources have changed
         const notification = {
           jsonrpc: '2.0',
           method: 'notifications/resources/list_changed',
-          params: {}
+          params: {},
         }
         this.connectedWS.send(JSON.stringify(notification))
-        
+
         if (process.env.CLAUDE_TERM_DEBUG) {
           console.log('✅ Both at_mentioned event and resource notification sent')
         }
       } else {
         console.log('❌ No WebSocket connection available')
       }
-      
+
       console.log(`📤 File sent to Claude using at_mentioned event: ${relativePath}`)
       console.log(`💡 Claude should now be aware of this file`)
       console.log(`📋 Active files: ${this.activeFiles.size}`)
-      
+
       // Show a preview
       const lang = this.getLanguageFromExt(path.extname(filePath))
       console.log(`\nPreview (first 200 chars):`)
@@ -897,7 +889,6 @@ export class ClaudeTermIDEServer {
         console.log(`... (${content.length - 200} more characters)`)
       }
       console.log(`\`\`\`\n`)
-      
     } catch (error) {
       console.error('Error reading file:', filePath, error)
     }
@@ -906,18 +897,17 @@ export class ClaudeTermIDEServer {
   private handleOpenDiff(args: any): string {
     try {
       const { old_file_path, new_file_path, new_file_contents } = args
-      
+
       // Read the current file content
       let originalContent = ''
       if (fs.existsSync(old_file_path)) {
         originalContent = fs.readFileSync(old_file_path, 'utf8')
       }
-      
+
       // Display the diff
       this.displayDiff(new_file_path, originalContent, new_file_contents)
-      
+
       return `Diff displayed for ${new_file_path}`
-      
     } catch (error) {
       console.error('Error handling openDiff:', error)
       return `Error displaying diff: ${error instanceof Error ? error.message : 'Unknown error'}`
@@ -929,7 +919,7 @@ export class ClaudeTermIDEServer {
       this.rl.close()
       this.rl = null
     }
-    
+
     if (this.server) {
       this.server.close()
     }
@@ -940,9 +930,139 @@ export class ClaudeTermIDEServer {
       console.log(`Lock file removed: ${this.lockFilePath}`)
     }
   }
+  // New prompt sending methods
+  private sendPrompt(message: string): void {
+    try {
+      if (!this.promptSender) {
+        console.log('❌ Prompt sender not initialized')
+        return
+      }
+      console.log(`\n📤 Sending prompt to Claude: "${message}"`)
+      this.promptSender.sendPrompt(message)
+    } catch (error) {
+      console.error('Error sending prompt:', error)
+    }
+  }
+
+  private handleContextCommand(args: string): void {
+    const parts = args.split(' ')
+    if (parts.length < 2) {
+      console.log('Usage: /context <files...> <message>')
+      console.log('Example: /context src/main.ts src/utils.ts Please review these files')
+      return
+    }
+
+    // Find where the message starts (look for the first non-file-like argument)
+    let messageStartIndex = -1
+    for (let i = 0; i < parts.length; i++) {
+      if (!parts[i].includes('.') && !parts[i].startsWith('./') && !parts[i].startsWith('/')) {
+        messageStartIndex = i
+        break
+      }
+    }
+
+    if (messageStartIndex === -1) {
+      messageStartIndex = parts.length - 1
+    }
+
+    const filePaths = parts.slice(0, messageStartIndex)
+    const message = parts.slice(messageStartIndex).join(' ')
+
+    if (filePaths.length === 0 || !message) {
+      console.log('Usage: /context <files...> <message>')
+      return
+    }
+
+    try {
+      if (!this.promptSender) {
+        console.log('❌ Prompt sender not initialized')
+        return
+      }
+      console.log(`\n📤 Sending prompt with context: "${message}"`)
+      console.log(`📁 Including files: ${filePaths.join(', ')}`)
+      
+      const context = this.promptSender.gatherFileContext(filePaths)
+      this.promptSender.sendPrompt(message, context)
+    } catch (error) {
+      console.error('Error sending contextual prompt:', error)
+    }
+  }
+
+  private handleTemplateCommand(args: string): void {
+    const parts = args.split(' ')
+    if (parts.length === 0) {
+      console.log('Usage: /template <name> [param1=value1] [param2=value2]')
+      console.log('Use /templates to list available templates')
+      return
+    }
+
+    const templateName = parts[0]
+    
+    if (parts.length === 1) {
+      const usage = this.templateManager.getTemplateUsage(templateName)
+      if (usage) {
+        console.log(usage)
+      } else {
+        console.log(`Template '${templateName}' not found. Use /templates to list available templates.`)
+      }
+      return
+    }
+
+    const template = this.templateManager.getTemplate(templateName)
+    if (!template) {
+      console.log(`Template '${templateName}' not found. Use /templates to list available templates.`)
+      return
+    }
+
+    const parameters: Record<string, string> = {}
+    for (let i = 1; i < parts.length; i++) {
+      const part = parts[i]
+      if (part.includes('=')) {
+        const [key, ...valueParts] = part.split('=')
+        parameters[key] = valueParts.join('=')
+      } else {
+        const paramNames = template.parameters || []
+        const paramIndex = i - 1
+        if (paramIndex < paramNames.length) {
+          parameters[paramNames[paramIndex]] = part
+        }
+      }
+    }
+
+    try {
+      if (!this.promptSender) {
+        console.log('❌ Prompt sender not initialized')
+        return
+      }
+      const promptMessage = this.templateManager.substituteParameters(template, parameters)
+      console.log(`\n📋 Using template: ${templateName}`)
+      console.log(`📤 Generated prompt: "${promptMessage.substring(0, 100)}${promptMessage.length > 100 ? '...' : ''}"`)
+      
+      this.promptSender.sendPrompt(promptMessage, undefined, templateName)
+    } catch (error) {
+      console.error('Error using template:', error)
+    }
+  }
+
+  private listTemplates(): void {
+    const templates = this.templateManager.listTemplates()
+    
+    if (templates.length === 0) {
+      console.log('No templates found. Templates should be placed in docs/prompt-templates/')
+      return
+    }
+
+    console.log('\nAvailable templates:')
+    for (const template of templates) {
+      console.log(`  ${template.name} - ${template.description}`)
+      if (template.parameters && template.parameters.length > 0) {
+        console.log(`    Parameters: {${template.parameters.join('}, {')})}`)
+      }
+    }
+    console.log('\nUsage: /template <name> [params...] or /template <name> for details')
+  }
 }
 
-// CLI command for starting IDE server
 export async function startIDEServer(options: IDEServerOptions): Promise<void> {
   // Check if an IDE with the same name already exists
   const ideName = options.ideName || 'claude-term'

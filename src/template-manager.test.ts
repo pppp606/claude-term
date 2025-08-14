@@ -199,7 +199,7 @@ Hello {name}, please {action}.
       expect(usage).toContain('Parameters:')
       expect(usage).toContain('{name}')
       expect(usage).toContain('{action}')
-      expect(usage).toContain('Usage: :template test_template param1=value1 param2=value2')
+      expect(usage).toContain('Usage: /template test_template param1=value1 param2=value2')
     })
 
     it('should return null for non-existent template', () => {
