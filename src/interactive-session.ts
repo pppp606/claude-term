@@ -7,6 +7,7 @@ import path from 'path'
 import os from 'os'
 import { PromptSender } from './prompt-sender.js'
 import { PromptResponse } from './types/prompt-types.js'
+import { TemplateManager } from './template-manager.js'
 
 export interface DiffProposal {
   filePath: string
@@ -25,11 +26,13 @@ export interface MCPMessage {
 export class InteractiveSession extends EventEmitter {
   private ws: WebSocket
   private promptSender: PromptSender
+  private templateManager: TemplateManager
 
   constructor(websocket: WebSocket) {
     super()
     this.ws = websocket
     this.promptSender = new PromptSender(websocket)
+    this.templateManager = new TemplateManager()
     this.setupWebSocketHandlers()
     this.setupPromptHandlers()
   }
@@ -197,6 +200,79 @@ export class InteractiveSession extends EventEmitter {
     }
   }
 
+  public handleTemplateCommand(args: string): void {
+    const parts = args.split(' ')
+    if (parts.length === 0) {
+      console.log('Usage: :template <name> [param1=value1] [param2=value2]')
+      console.log('Use :templates to list available templates')
+      return
+    }
+
+    const templateName = parts[0]
+    
+    // Show template info if just the name is provided
+    if (parts.length === 1) {
+      const usage = this.templateManager.getTemplateUsage(templateName)
+      if (usage) {
+        console.log(usage)
+      } else {
+        console.log(`Template '${templateName}' not found. Use :templates to list available templates.`)
+      }
+      return
+    }
+
+    const template = this.templateManager.getTemplate(templateName)
+    if (!template) {
+      console.log(`Template '${templateName}' not found. Use :templates to list available templates.`)
+      return
+    }
+
+    // Parse parameters (format: param1=value1 param2=value2)
+    const parameters: Record<string, string> = {}
+    for (let i = 1; i < parts.length; i++) {
+      const part = parts[i]
+      if (part.includes('=')) {
+        const [key, ...valueParts] = part.split('=')
+        parameters[key] = valueParts.join('=') // Handle values with '=' in them
+      } else {
+        // If no '=' found, treat as a positional parameter
+        const paramNames = template.parameters || []
+        const paramIndex = i - 1
+        if (paramIndex < paramNames.length) {
+          parameters[paramNames[paramIndex]] = part
+        }
+      }
+    }
+
+    try {
+      const promptMessage = this.templateManager.substituteParameters(template, parameters)
+      console.log(`\n📋 Using template: ${templateName}`)
+      console.log(`📤 Generated prompt: "${promptMessage.substring(0, 100)}${promptMessage.length > 100 ? '...' : ''}"`)
+      
+      this.promptSender.sendPrompt(promptMessage, undefined, templateName)
+    } catch (error) {
+      console.error('Error using template:', error)
+    }
+  }
+
+  public listTemplates(): void {
+    const templates = this.templateManager.listTemplates()
+    
+    if (templates.length === 0) {
+      console.log('No templates found. Templates should be placed in docs/prompt-templates/')
+      return
+    }
+
+    console.log('\nAvailable templates:')
+    for (const template of templates) {
+      console.log(`  ${template.name} - ${template.description}`)
+      if (template.parameters && template.parameters.length > 0) {
+        console.log(`    Parameters: {${template.parameters.join('}, {')})}`)
+      }
+    }
+    console.log('\nUsage: :template <name> [params...] or :template <name> for details')
+  }
+
   public async sendFile(filePath: string): Promise<void> {
     try {
       const content = fs.readFileSync(filePath, 'utf8')
@@ -225,6 +301,8 @@ export class InteractiveSession extends EventEmitter {
       console.log('  :prompt <message> - Send prompt/message to Claude')
       console.log('  :ask <message> - Alias for :prompt')
       console.log('  :context <files...> <message> - Send prompt with file context')
+      console.log('  :template <name> [params...] - Use a predefined template')
+      console.log('  :templates - List available templates')
       console.log('  :send <path> - Send file content to Claude')
       console.log('  :browse - Browse files with fzf (interactive file picker)')
       console.log('  :cat <path> - Display file with syntax highlighting (bat)')
@@ -244,6 +322,10 @@ export class InteractiveSession extends EventEmitter {
       }
     } else if (trimmed.startsWith(':context ')) {
       this.handleContextCommand(trimmed.substring(9).trim())
+    } else if (trimmed.startsWith(':template ')) {
+      this.handleTemplateCommand(trimmed.substring(10).trim())
+    } else if (trimmed === ':templates') {
+      this.listTemplates()
     } else if (trimmed.startsWith(':send ')) {
       const filePath = trimmed.substring(6).trim()
       if (filePath) {
