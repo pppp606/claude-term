@@ -638,7 +638,7 @@ export class ClaudeTermIDEServer {
       console.log('  /templates - List available templates')
       console.log('  /send <path> - Send file to Claude directly')
       console.log('  /browse - Browse and interact with files (recommended)')
-      console.log('  /cat <path> - Display file directly')
+      console.log('  /cat <path> - Display file interactively, select text to send to Claude')
       console.log('  /search <pattern> - Search code with ripgrep')
       console.log('  /active - Show active files (resources)')
       console.log('  /help - Show this help message')
@@ -654,9 +654,10 @@ export class ClaudeTermIDEServer {
     } else if (trimmed.startsWith('/cat ')) {
       const filePath = trimmed.substring(5).trim()
       if (filePath) {
-        this.displayFile(path.resolve(workspaceFolder, filePath))
+        await this.displayFileInteractive(path.resolve(workspaceFolder, filePath))
       } else {
         console.log('Usage: /cat <path>')
+        console.log('Interactive selection mode enabled - select text to send to Claude')
       }
     } else if (trimmed.startsWith('/search ')) {
       const pattern = trimmed.substring(9).trim()
@@ -720,7 +721,7 @@ export class ClaudeTermIDEServer {
         const fullPath = path.resolve(workspaceFolder, selectedFile)
         switch (choice) {
           case '1':
-            this.displayFile(fullPath)
+            await this.displayFileInteractive(fullPath)
             break
           case '2':
             if (this.connectedWS) {
@@ -751,24 +752,6 @@ export class ClaudeTermIDEServer {
     })
   }
 
-  private displayFile(filePath: string): void {
-    try {
-      console.log(`\n📄 Displaying: ${filePath}`)
-      try {
-        execSync(`bat --color=always --style=header,grid,numbers "${filePath}"`, {
-          stdio: 'inherit',
-        })
-      } catch {
-        try {
-          execSync(`cat "${filePath}"`, { stdio: 'inherit' })
-        } catch {
-          console.error(`Cannot read file: ${filePath}`)
-        }
-      }
-    } catch (error) {
-      console.error('Error displaying file:', error)
-    }
-  }
 
   private searchCode(pattern: string, workspaceFolder: string): void {
     try {
@@ -1060,6 +1043,139 @@ export class ClaudeTermIDEServer {
       }
     }
     console.log('\nUsage: /template <name> [params...] or /template <name> for details')
+  }
+
+  // Interactive file selection methods
+  private async displayFileInteractive(filePath: string): Promise<void> {
+    try {
+      if (!fs.existsSync(filePath)) {
+        console.error(`File not found: ${filePath}`)
+        return
+      }
+
+      const content = fs.readFileSync(filePath, 'utf8')
+      
+      console.log(`\n📄 Interactive File Selector: ${path.basename(filePath)}`)
+      console.log('📝 Instructions:')
+      console.log('  • Use ↑↓ arrows or j/k to navigate')
+      console.log('  • Press Tab to select multiple lines')
+      console.log('  • Press Enter to send selected lines to Claude')
+      console.log('  • Press Esc to cancel\n')
+
+      await this.selectLinesWithFzf(filePath, content)
+
+    } catch (error) {
+      console.error('Error in interactive file display:', error)
+    }
+  }
+
+  private async selectLinesWithFzf(filePath: string, content: string): Promise<void> {
+    try {
+      const lines = content.split('\n')
+      
+      // Create temporary file with numbered lines for fzf
+      const tmpDir = os.tmpdir()
+      const tmpFile = path.join(tmpDir, `claude-term-lines-${randomUUID()}.txt`)
+      
+      // Format lines with line numbers
+      const numberedLines = lines.map((line, index) => 
+        `${(index + 1).toString().padStart(4, ' ')}: ${line}`
+      ).join('\n')
+      
+      fs.writeFileSync(tmpFile, numberedLines)
+
+      // Use fzf for line selection - simple and reliable
+      const fzfCommand = `cat "${tmpFile}" | fzf \\
+        --multi \\
+        --reverse \\
+        --height=80% \\
+        --border \\
+        --header="Select lines with Tab, press Enter to send to Claude" \\
+        --prompt="Lines> "`
+
+      console.log('🔍 Opening fzf line selector...')
+      console.log('💡 Select lines with Tab, press Enter to send to Claude')
+      
+      const selectedLines = execSync(fzfCommand, {
+        encoding: 'utf8',
+        stdio: ['inherit', 'pipe', 'inherit'],
+      }).trim()
+
+      // Clean up temp files
+      fs.unlinkSync(tmpFile)
+
+      if (selectedLines) {
+        await this.processFzfSelection(filePath, content, selectedLines)
+      } else {
+        console.log('❌ No lines selected')
+      }
+
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('Command failed')) {
+        console.log('❌ Selection cancelled or fzf not available')
+        console.log('💡 Install fzf: brew install fzf (macOS) or apt install fzf (Ubuntu)')
+      } else {
+        console.error('Error in fzf selection:', error)
+      }
+    }
+  }
+
+  private async processFzfSelection(filePath: string, content: string, selectedLines: string): Promise<void> {
+    try {
+      const lines = content.split('\n')
+      const selections = selectedLines.split('\n')
+      
+      // Extract line numbers from fzf output
+      const lineNumbers = selections.map(line => {
+        const match = line.match(/^\s*(\d+):/)
+        return match ? parseInt(match[1]) - 1 : -1 // Convert to 0-based
+      }).filter(num => num >= 0)
+
+      if (lineNumbers.length === 0) {
+        console.log('❌ No valid lines selected')
+        return
+      }
+
+      // Sort line numbers
+      lineNumbers.sort((a, b) => a - b)
+
+      // Get selected text
+      const selectedText = lineNumbers.map(lineNum => lines[lineNum]).join('\n')
+      const startLine = lineNumbers[0]
+      const endLine = lineNumbers[lineNumbers.length - 1]
+
+      if (!this.connectedWS) {
+        console.error('❌ No Claude Code connection available')
+        return
+      }
+
+      // Send selection_changed event to Claude Code  
+      const selectionMessage = {
+        jsonrpc: '2.0',
+        method: 'selection_changed',
+        params: {
+          filePath: filePath,
+          selection: {
+            start: { line: startLine, character: 0 },
+            end: { line: endLine, character: lines[endLine]?.length || 0 }
+          },
+          text: content,
+          selectedText: selectedText
+        }
+      }
+
+      console.log(`\n📤 Sending selection to Claude Code:`)
+      console.log(`📄 File: ${path.relative(this.options.workspaceFolder || process.cwd(), filePath)}`)
+      console.log(`📍 Lines: ${startLine + 1}-${endLine + 1}`)
+      console.log(`📝 Selected text (${selectedText.length} chars):`)
+      console.log(selectedText.substring(0, 200) + (selectedText.length > 200 ? '...' : ''))
+
+      this.connectedWS.send(JSON.stringify(selectionMessage))
+      console.log(`\n✅ Selection sent to Claude Code!`)
+
+    } catch (error) {
+      console.error('Error processing fzf selection:', error)
+    }
   }
 }
 
