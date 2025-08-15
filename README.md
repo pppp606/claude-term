@@ -2,7 +2,7 @@
 
 `claude-term` is a lightweight IDE server for Claude Code that enables AI-assisted coding entirely from the terminal. It provides full Claude Code functionality without requiring heavy GUI IDEs.
 
-*Test multiple unpushed commits display*
+*Test improved visual diff display with icons and borders*
 
 ## What is claude-term?
 
