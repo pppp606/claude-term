@@ -2,6 +2,7 @@
 
 import { startIDEServer } from './ide-server.js'
 import { GitReviewManager } from './git-review.js'
+import { GitApprovalManager } from './git-approval.js'
 import { fileURLToPath } from 'url'
 import path from 'path'
 import { Command } from 'commander'
@@ -40,6 +41,42 @@ program
       await gitReview.displayCommitReview(options.range)
     } catch (error) {
       console.error('❌ Review failed:', error instanceof Error ? error.message : error)
+      process.exit(1)
+    }
+  })
+
+// Git approval command
+program
+  .command('approve')
+  .description('Interactive commit approval with push workflow')
+  .option('-p, --push', 'Automatically push after approval')
+  .option('--amend <message>', 'Amend commit message')
+  .option('--rollback', 'Rollback the latest commit')
+  .action(async (options: { push?: boolean; amend?: string; rollback?: boolean }) => {
+    const gitApproval = new GitApprovalManager()
+    
+    try {
+      // Handle specific actions first
+      if (options.rollback) {
+        await gitApproval.rollbackCommit()
+        return
+      }
+      
+      if (options.amend) {
+        await gitApproval.amendCommit(options.amend)
+        return
+      }
+      
+      // Run interactive approval flow
+      const result = await gitApproval.interactiveApprovalFlow()
+      
+      if (result.action === 'approved' && options.push) {
+        console.log('\n🚀 Pushing to remote...')
+        // This will be implemented in Phase 3
+        console.log('⚠️  Auto-push feature coming in Phase 3')
+      }
+    } catch (error) {
+      console.error('❌ Approval failed:', error instanceof Error ? error.message : error)
       process.exit(1)
     }
   })
