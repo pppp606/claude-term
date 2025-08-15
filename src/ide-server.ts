@@ -697,12 +697,24 @@ export class ClaudeTermIDEServer {
       
       console.log(`\n❓ push to origin/${currentBranch}? (y/n):`)
       
-      // Set waiting state before recreating readline
+      // Set waiting state
       this.waitingForApproval = true
       
-      // Recreate readline after setting the prompt
+      // Completely reset stdin state and recreate readline with proper timing
       if (wasReadlineActive) {
-        this.createReadlineInterface()
+        // Clear stdin completely
+        if (process.stdin.readable) {
+          process.stdin.pause()
+          // Drain any pending data
+          process.stdin.read()
+          process.stdin.resume()
+          process.stdin.pause()
+        }
+        
+        // Longer delay to ensure stdin state is completely clean
+        setTimeout(() => {
+          this.createReadlineInterface()
+        }, 300)
       }
     } catch (error) {
       console.error('❌ Failed to review commit:', error instanceof Error ? error.message : error)
@@ -716,13 +728,18 @@ export class ClaudeTermIDEServer {
   }
 
   private createReadlineInterface(): void {
-    // Clear any pending input before creating new readline
+    // Completely clear stdin before creating new readline
     if (process.stdin.readable) {
       process.stdin.pause()
+      // Drain all pending input
+      while (process.stdin.read() !== null) {
+        // Discard all pending input
+      }
       process.stdin.resume()
+      process.stdin.pause()
     }
     
-    // Add a delay to ensure terminal state is clean
+    // Shorter delay since we've already done thorough cleanup
     setTimeout(() => {
       this.rl = readline.createInterface({
         input: process.stdin,
@@ -752,7 +769,7 @@ export class ClaudeTermIDEServer {
       if (!this.waitingForApproval) {
         this.rl.prompt()
       }
-    }, 150)
+    }, 100)
   }
 
   private async handleApprovalChoice(choice: string): Promise<void> {
