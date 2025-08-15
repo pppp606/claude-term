@@ -2,6 +2,8 @@
 
 `claude-term` is a lightweight IDE server for Claude Code that enables AI-assisted coding entirely from the terminal. It provides full Claude Code functionality without requiring heavy GUI IDEs.
 
+*Test commit for enhanced reject functionality*
+
 ## What is claude-term?
 
 Instead of using Claude Code through IDEs like VSCode or Cursor, `claude-term` acts as a minimal IDE server that Claude Code can connect to. This allows you to:
