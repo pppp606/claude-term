@@ -465,15 +465,9 @@ export class ClaudeTermIDEServer {
 
     const fullPath = path.resolve(this.options.workspaceFolder || process.cwd(), filePath)
 
-    // Show diff if file exists
-    if (fs.existsSync(fullPath)) {
-      try {
-        const originalContent = fs.readFileSync(fullPath, 'utf8')
-        this.displayDiff(filePath, originalContent, newContent)
-      } catch (error) {
-        console.error('Error reading original file for diff:', error)
-      }
-    } else {
+    // Simply write the file without showing diff
+    // Diff review is now handled by /review-push command
+    if (!fs.existsSync(fullPath)) {
       console.log(`\n📝 Creating new file: ${filePath}`)
     }
 
@@ -481,58 +475,7 @@ export class ClaudeTermIDEServer {
     return `File written successfully: ${filePath}`
   }
 
-  private displayDiff(filePath: string, originalContent: string, newContent: string): void {
-    console.log(`\n📝 Changes to: ${filePath}`)
-
-    try {
-      // Create temporary files for diff with proper extensions for syntax highlighting
-      const tmpDir = os.tmpdir()
-      const fileExt = path.extname(filePath) || '.txt'
-      const originalFile = path.join(tmpDir, `claude-term-original-${randomUUID()}${fileExt}`)
-      const modifiedFile = path.join(tmpDir, `claude-term-modified-${randomUUID()}${fileExt}`)
-
-      fs.writeFileSync(originalFile, originalContent)
-      fs.writeFileSync(modifiedFile, newContent)
-
-      // Check if delta is available
-      let hasDelta = false
-      try {
-        execSync('command -v delta', { stdio: 'ignore' })
-        hasDelta = true
-      } catch {}
-
-      if (hasDelta) {
-        // Use delta (ignore exit code as it returns 1 for differences)
-        try {
-          execSync(
-            `delta --pager=never --syntax-theme=Dracula --no-gitconfig --file-style=omit --hunk-header-style=omit --keep-plus-minus-markers "${originalFile}" "${modifiedFile}"`,
-            {
-              stdio: 'inherit',
-            },
-          )
-        } catch {
-          // Delta executed but returned non-zero exit code (normal for diffs)
-        }
-      } else {
-        // Fall back to system diff
-        try {
-          execSync(`diff -u "${originalFile}" "${modifiedFile}"`, {
-            stdio: 'inherit',
-          })
-        } catch {
-          // diff also returns non-zero for differences, which is normal
-        }
-      }
-
-      // Clean up temp files
-      fs.unlinkSync(originalFile)
-      fs.unlinkSync(modifiedFile)
-    } catch (error) {
-      console.error('Error creating diff:', error)
-    }
-
-    console.log('')
-  }
+  // Removed displayDiff method - diff review is now handled by /review-push command
 
   private startInteractiveSession(): void {
     console.log('\n🔄 Interactive IDE server session started')
@@ -1017,21 +960,16 @@ export class ClaudeTermIDEServer {
 
   private handleOpenDiff(args: any): string {
     try {
-      const { old_file_path, new_file_path, new_file_contents } = args
+      const { new_file_path } = args
 
-      // Read the current file content
-      let originalContent = ''
-      if (fs.existsSync(old_file_path)) {
-        originalContent = fs.readFileSync(old_file_path, 'utf8')
-      }
+      // No longer display individual diffs - use /review-push for comprehensive diff review
+      console.log(`📝 File modified: ${new_file_path}`)
+      console.log('💡 Use /review-push (/rp) to review all changes before pushing')
 
-      // Display the diff
-      this.displayDiff(new_file_path, originalContent, new_file_contents)
-
-      return `Diff displayed for ${new_file_path}`
+      return `File modification noted for ${new_file_path}`
     } catch (error) {
       console.error('Error handling openDiff:', error)
-      return `Error displaying diff: ${error instanceof Error ? error.message : 'Unknown error'}`
+      return `Error handling file modification: ${error instanceof Error ? error.message : 'Unknown error'}`
     }
   }
 
