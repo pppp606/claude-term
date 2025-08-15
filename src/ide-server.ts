@@ -25,7 +25,7 @@ export class ClaudeTermIDEServer {
   private rl: readline.Interface | null = null
   private gitReview: GitReviewManager
   private gitPush: GitPushManager
-  private pendingCommitReview: boolean = false
+  private waitingForApproval: boolean = false
 
   constructor(private options: IDEServerOptions = {}) {
     this.authToken = randomUUID()
@@ -109,7 +109,7 @@ export class ClaudeTermIDEServer {
     // Start interactive session
     this.startInteractiveSession()
 
-    ws.on('message', (data: Buffer) => {
+    ws.on('message', async (data: Buffer) => {
       try {
         const message = JSON.parse(data.toString())
 
@@ -129,7 +129,7 @@ export class ClaudeTermIDEServer {
         } else if (message.method === 'tools/list') {
           this.handleToolsList(ws, message)
         } else if (message.method?.startsWith('tools/')) {
-          this.handleToolCall(ws, message)
+          await this.handleToolCall(ws, message)
         } else if (message.method?.startsWith('resources/')) {
           this.handleResourceCall(ws, message)
         } else {
@@ -285,6 +285,15 @@ export class ClaudeTermIDEServer {
               properties: {},
             },
           },
+          {
+            name: 'reviewPush',
+            description: 'Review unpushed commits and initiate push workflow with user approval',
+            inputSchema: {
+              type: 'object',
+              properties: {},
+              required: [],
+            },
+          },
         ],
       },
     }
@@ -293,7 +302,22 @@ export class ClaudeTermIDEServer {
     console.log('📋 Sent tools list to Claude Code')
   }
 
-  private handleToolCall(ws: WebSocket, message: any): void {
+  private async handleReviewPushTool(_params: any): Promise<string> {
+    try {
+      console.log('\n🔍 Claude Code requested commit review...')
+      
+      // Execute the review-push workflow
+      await this.handleReviewPushCommand()
+      
+      return 'Review-push workflow initiated. User will see commit review in less pager and can approve/reject with y/n.'
+    } catch (error) {
+      const errorMsg = `Failed to initiate review-push: ${error instanceof Error ? error.message : error}`
+      console.error('❌', errorMsg)
+      return errorMsg
+    }
+  }
+
+  private async handleToolCall(ws: WebSocket, message: any): Promise<void> {
     const method = message.method
     const params = message.params || {}
 
@@ -303,6 +327,9 @@ export class ClaudeTermIDEServer {
       if (method === 'tools/call' && params.name === 'openDiff') {
         // Handle Claude Code's openDiff tool call
         result = this.handleOpenDiff(params.arguments)
+      } else if (method === 'tools/call' && params.name === 'reviewPush') {
+        // Handle Claude Code's reviewPush tool call
+        result = await this.handleReviewPushTool(params.arguments)
       } else if (method.startsWith('tools/')) {
         const toolName = method.replace('tools/', '')
         switch (toolName) {
@@ -512,7 +539,7 @@ export class ClaudeTermIDEServer {
     console.log('Type /help for available commands')
     console.log('Waiting for Claude Code requests...\n')
 
-    // Create readline interface with tab completion
+    // Create readline interface with tab completion (without delay for startup)
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
@@ -540,7 +567,7 @@ export class ClaudeTermIDEServer {
   }
 
   private completeCommand(line: string): [string[], string] {
-    const commands = ['/help', '/send ', '/browse', '/cat ', '/search ', '/active', '/quit', '/push', 'approve']
+    const commands = ['/help', '/send ', '/browse', '/cat ', '/search ', '/active', '/quit', '/review-push', '/rp']
 
     const hits = commands.filter((cmd) => cmd.startsWith(line))
 
@@ -592,10 +619,16 @@ export class ClaudeTermIDEServer {
     const trimmed = command.trim()
     const workspaceFolder = this.options.workspaceFolder || process.cwd()
     
-    // Clear pending commit review if user runs other commands (except approve)
-    if (this.pendingCommitReview && trimmed !== 'approve') {
-      this.pendingCommitReview = false
-      console.log('📋 Commit review cancelled.')
+    // Handle approval choice input
+    if (this.waitingForApproval) {
+      await this.handleApprovalChoice(trimmed.toLowerCase())
+      return
+    }
+    
+    // Clear waiting for approval if user runs other commands  
+    if (this.waitingForApproval && !['y', 'n', 'yes', 'no'].includes(trimmed.toLowerCase())) {
+      this.waitingForApproval = false
+      console.log('📋 Approval cancelled.')
     }
 
     if (trimmed === '/help') {
@@ -605,8 +638,7 @@ export class ClaudeTermIDEServer {
       console.log('  /cat <path> - Display file interactively, select text to send to Claude')
       console.log('  /search <pattern> - Search code with ripgrep')
       console.log('  /active - Show active files (resources)')
-      console.log('  /push - Review latest commit and prepare for push')
-      console.log('  approve - Approve and push the reviewed commit')
+      console.log('  /review-push (/rp) - Review unpushed commits and approve/reject for push')
       console.log('  /help - Show this help message')
       console.log('  /quit - Stop the server and exit')
     } else if (trimmed === '/quit') {
@@ -641,61 +673,147 @@ export class ClaudeTermIDEServer {
       } else {
         console.log('Usage: /send <path>')
       }
-    } else if (trimmed === '/push') {
-      await this.handlePushCommand()
-    } else if (trimmed === 'approve') {
-      await this.handleApproveCommand()
+    } else if (trimmed === '/review-push' || trimmed === '/rp') {
+      await this.handleReviewPushCommand()
     } else if (trimmed.startsWith('/')) {
       console.log(`Unknown command: ${trimmed}`)
       console.log('Type /help for available commands')
     }
   }
 
-  private async handlePushCommand(): Promise<void> {
+  private async handleReviewPushCommand(): Promise<void> {
     try {
-      console.log('\n🔍 Reviewing latest commit for push...')
-      console.log('═'.repeat(50))
+      // Completely close readline during less operation
+      const wasReadlineActive = !!this.rl
+      if (this.rl) {
+        this.rl.close()
+        this.rl = null
+      }
       
       await this.gitReview.displayCommitReview()
       
-      this.pendingCommitReview = true
-      console.log('\n💡 Type "approve" to push this commit or any other command to cancel')
-      console.log('───────────────────────────────────────────────')
+      // Get current branch for prompt
+      const currentBranch = execSync('git branch --show-current', { encoding: 'utf8' }).trim()
+      
+      // Recreate readline after less finishes
+      if (wasReadlineActive) {
+        this.createReadlineInterface()
+      }
+      
+      console.log(`\n❓ push to origin/${currentBranch}? (y/n):`)
+      
+      this.waitingForApproval = true
     } catch (error) {
       console.error('❌ Failed to review commit:', error instanceof Error ? error.message : error)
-      this.pendingCommitReview = false
+      this.waitingForApproval = false
+      
+      // Make sure to recreate readline on error
+      if (!this.rl) {
+        this.createReadlineInterface()
+      }
     }
   }
 
-  private async handleApproveCommand(): Promise<void> {
-    if (!this.pendingCommitReview) {
-      console.log('⚠️  No commit pending review. Use /push first to review a commit.')
-      return
-    }
+  private createReadlineInterface(): void {
+    // Add a small delay to prevent double input issues
+    setTimeout(() => {
+      this.rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        completer: this.completeCommand.bind(this),
+        prompt: '> ',
+      })
+
+      this.rl.on('line', async (input) => {
+        const trimmed = input.trim()
+
+        if (trimmed) {
+          await this.processCommand(trimmed)
+        }
+
+        this.rl?.prompt()
+      })
+
+      this.rl.on('SIGINT', () => {
+        this.stop()
+        process.exit(0)
+      })
+
+      // Show initial prompt
+      this.rl.prompt()
+    }, 100)
+  }
+
+  private async handleApprovalChoice(choice: string): Promise<void> {
+    this.waitingForApproval = false
 
     try {
-      console.log('\n🚀 Initiating push workflow...')
       
-      // Get current branch name
-      const currentBranch = execSync('git branch --show-current', {
-        encoding: 'utf8'
-      }).trim()
-      
-      const pushResult = await this.gitPush.autoPushFlow(currentBranch)
-      
-      if (pushResult.success && pushResult.pushed) {
-        console.log(`\n🎉 ${pushResult.message}`)
-      } else if (pushResult.success && !pushResult.pushed) {
-        console.log(`\n📋 ${pushResult.message}`)
+      if (choice === 'y' || choice === 'yes') {
+        console.log('\n🚀 Initiating push workflow...')
+        
+        // Get current branch name
+        const currentBranch = execSync('git branch --show-current', {
+          encoding: 'utf8'
+        }).trim()
+        
+        const pushResult = await this.gitPush.autoPushFlow(currentBranch)
+        
+        if (pushResult.success && pushResult.pushed) {
+          console.log(`\n🎉 ${pushResult.message}`)
+        } else if (pushResult.success && !pushResult.pushed) {
+          console.log(`\n📋 ${pushResult.message}`)
+        } else {
+          console.error(`\n❌ ${pushResult.message}`)
+        }
+      } else if (choice === 'n' || choice === 'no') {
+        console.log('\n🔄 Rejecting commit and undoing...')
+        
+        try {
+          // Get unpushed commit count to reset
+          const unpushedCount = await this.gitReview.getUnpushedCommitCount()
+          
+          if (unpushedCount === 0) {
+            console.log('⚠️  No unpushed commits to undo.')
+            return
+          }
+          
+          // Show current commit hash before reset
+          const currentCommit = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim()
+          console.log(`📍 Current commit: ${currentCommit.substring(0, 8)}`)
+          console.log(`🔄 Undoing ${unpushedCount} unpushed commit${unpushedCount > 1 ? 's' : ''}...`)
+          
+          // Reset to before unpushed commits but keep changes in working directory
+          const resetCommand = `git reset --soft HEAD~${unpushedCount}`
+          console.log(`🔧 Executing: ${resetCommand}`)
+          const resetResult = execSync(resetCommand, {
+            encoding: 'utf8'
+          })
+          console.log(`✅ Reset soft result: ${resetResult || 'Success (no output)'}`)
+          
+          // Unstage all changes
+          console.log('🔧 Executing: git reset')
+          const unstageResult = execSync('git reset', {
+            encoding: 'utf8'
+          })
+          console.log(`✅ Unstage result: ${unstageResult || 'Success (no output)'}`)
+          
+          // Show final status
+          const finalCommit = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim()
+          console.log(`📍 Final commit: ${finalCommit.substring(0, 8)}`)
+          
+          console.log(`✅ ${unpushedCount} commit${unpushedCount > 1 ? 's' : ''} undone successfully`)
+          console.log('📝 Changes remain in working directory (unstaged)')
+        } catch (error) {
+          console.error('❌ Failed to undo commit:', error instanceof Error ? error.message : error)
+        }
       } else {
-        console.error(`\n❌ ${pushResult.message}`)
+        console.log('❌ Invalid choice. Please enter y or n.')
+        console.log('📋 Approval cancelled. Use "approve" again to retry.')
       }
       
     } catch (error) {
-      console.error('❌ Push failed:', error instanceof Error ? error.message : error)
-    } finally {
-      this.pendingCommitReview = false
-      console.log('───────────────────────────────────────────────')
+      console.error('❌ Approval process failed:', error instanceof Error ? error.message : error)
     }
   }
 

@@ -2,7 +2,6 @@
 
 `claude-term` is a lightweight IDE server for Claude Code that enables AI-assisted coding entirely from the terminal. It provides full Claude Code functionality without requiring heavy GUI IDEs.
 
-*Test improved visual diff display with icons and borders*
 
 ## What is claude-term?
 
@@ -92,13 +91,46 @@ Select your `claude-term-myproject` from the list and start coding!
 # 🔍 Search & Discovery
 /search "function.*authenticate"    # ripgrep-powered code search
 /active    # Show files Claude can access
+
+# 🚀 Git Workflow
+/review-push (/rp)    # Review unpushed commits and approve/reject for push
+
+# ℹ️ Help & Control
 /help      # Show all available commands
 /quit      # Exit the session
 ```
 
-## Key Feature: Interactive Line Selection
+## Key Features
+
+### Interactive Line Selection
 
 The standout feature of `claude-term` is **interactive line selection** with fzf:
+
+### Git Review & Push Workflow
+
+`claude-term` includes a comprehensive Git workflow for reviewing and pushing commits safely:
+
+```bash
+# Review all unpushed commits with beautiful diff display
+/review-push    # or /rp for short
+```
+
+**What happens:**
+1. 📊 **Commit Analysis** - Automatically detects all unpushed commits
+2. 📄 **Less Pager** - Opens scrollable diff view with Delta syntax highlighting  
+3. 📋 **Commit List** - Shows all commits to be pushed with hash and message
+4. 📁 **File-by-File Diffs** - Beautiful, color-coded diffs for each changed file
+5. ✅ **User Approval** - Simple y/n choice after review
+6. 🚀 **Safe Push** - Pushes to remote if approved
+7. 🔄 **Smart Reject** - If rejected, undoes all commits while preserving changes
+
+**Perfect for:**
+- Reviewing code before pushing to shared branches
+- Ensuring no debug code or secrets are committed
+- Double-checking complex changes
+- Safe collaboration workflows
+
+### Interactive Line Selection (continued)
 
 ```bash
 # Open any file with the interactive selector
@@ -142,6 +174,14 @@ The standout feature of `claude-term` is **interactive line selection** with fzf
 - **ripgrep Integration**: Fast, powerful code search
 - **Interactive Results**: Search results with context
 - **Pattern Matching**: Full regex support
+
+### Git Review & Push Workflow ✅
+- **Unpushed Commit Detection**: Automatically finds commits ahead of origin
+- **Less Pager Integration**: Scrollable diff review with full terminal control
+- **Delta Syntax Highlighting**: Beautiful, color-coded diff display
+- **Safe Push Workflow**: User approval required before pushing
+- **Smart Reject**: Undo commits while preserving working directory changes
+- **Multi-commit Support**: Handles single or multiple unpushed commits
 
 ### Diff & Display ✅
 - **Delta Integration**: Beautiful diff rendering
@@ -209,6 +249,7 @@ claude
 /browse                     # File browser
 /cat src/main.js            # Interactive line selection ⭐
 /search "export.*function"  # Code search
+/rp                         # Git review & push workflow ⭐
 ```
 
 ## Comparison with Traditional IDEs

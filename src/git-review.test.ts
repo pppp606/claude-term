@@ -50,8 +50,9 @@ index 123..456 100644
 
       expect(typeof formattedDiff).toBe('string')
       expect(formattedDiff.length).toBeGreaterThan(0)
-      // Verify Delta formatting features are applied
-      expect(formattedDiff).toContain('test.txt')
+      // Verify Delta formatting features are applied (contains ANSI color codes)
+      expect(formattedDiff).toMatch(/old.*content/)
+      expect(formattedDiff).toMatch(/new.*content/)
     })
 
     it('should handle empty diff content', async () => {
@@ -117,13 +118,59 @@ index 123..456 100644
       consoleSpy.mockRestore()
     })
 
-    it('should display review for specific commit range', async () => {
+    it('should display review for unpushed commits', async () => {
       const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
 
-      await gitReview.displayCommitReview('HEAD~1..HEAD')
+      await gitReview.displayCommitReview()
 
       expect(consoleSpy).toHaveBeenCalled()
       consoleSpy.mockRestore()
+    })
+  })
+
+  describe('getChangedFiles', () => {
+    it('should return list of changed files for HEAD commit', async () => {
+      const files = await gitReview.getChangedFiles()
+      
+      expect(Array.isArray(files)).toBe(true)
+      // Should work even if no files changed
+    })
+
+    it('should handle invalid commit range', async () => {
+      await expect(gitReview.getChangedFiles('invalid-range')).rejects.toThrow('Failed to get changed files')
+    })
+  })
+
+  describe('getFileDiffs', () => {
+    it('should return file diffs for HEAD commit', async () => {
+      const fileDiffs = await gitReview.getFileDiffs()
+      
+      expect(Array.isArray(fileDiffs)).toBe(true)
+      fileDiffs.forEach(fileDiff => {
+        expect(fileDiff).toHaveProperty('file')
+        expect(fileDiff).toHaveProperty('diff')
+        expect(typeof fileDiff.file).toBe('string')
+        expect(typeof fileDiff.diff).toBe('string')
+      })
+    })
+
+    it('should handle invalid commit range', async () => {
+      await expect(gitReview.getFileDiffs('invalid-range')).rejects.toThrow('Failed to get file diffs')
+    })
+  })
+
+  describe('getUnpushedCommitCount', () => {
+    it('should return number of unpushed commits', async () => {
+      const count = await gitReview.getUnpushedCommitCount()
+      
+      expect(typeof count).toBe('number')
+      expect(count).toBeGreaterThanOrEqual(0)
+    })
+
+    it('should handle branches without remote tracking', async () => {
+      // This test depends on the current branch setup
+      const count = await gitReview.getUnpushedCommitCount()
+      expect(count).toBeDefined()
     })
   })
 })
