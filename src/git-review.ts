@@ -233,8 +233,8 @@ export class GitReviewManager {
         const tempFile = join(tmpdir(), `claude-commit-review-${Date.now()}.txt`)
         writeFileSync(tempFile, content)
         
-        // Create less process with full stdio inheritance
-        const less = spawn('less', ['-R', tempFile], {
+        // Create less process with full stdio inheritance and better options
+        const less = spawn('less', ['-R', '-X', tempFile], {
           stdio: 'inherit',
           detached: false
         })
