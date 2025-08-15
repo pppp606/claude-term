@@ -1,4 +1,0 @@
-This is a test file for Delta integration.
-It will help us create meaningful diffs for testing.
-Updated version has modified content with Delta visualization.
-Added new line for better diff demonstration.
