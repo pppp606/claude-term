@@ -695,14 +695,15 @@ export class ClaudeTermIDEServer {
       // Get current branch for prompt
       const currentBranch = execSync('git branch --show-current', { encoding: 'utf8' }).trim()
       
-      // Recreate readline after less finishes
+      console.log(`\n❓ push to origin/${currentBranch}? (y/n):`)
+      
+      // Set waiting state before recreating readline
+      this.waitingForApproval = true
+      
+      // Recreate readline after setting the prompt
       if (wasReadlineActive) {
         this.createReadlineInterface()
       }
-      
-      console.log(`\n❓ push to origin/${currentBranch}? (y/n):`)
-      
-      this.waitingForApproval = true
     } catch (error) {
       console.error('❌ Failed to review commit:', error instanceof Error ? error.message : error)
       this.waitingForApproval = false
@@ -715,7 +716,13 @@ export class ClaudeTermIDEServer {
   }
 
   private createReadlineInterface(): void {
-    // Add a small delay to prevent double input issues
+    // Clear any pending input before creating new readline
+    if (process.stdin.readable) {
+      process.stdin.pause()
+      process.stdin.resume()
+    }
+    
+    // Add a delay to ensure terminal state is clean
     setTimeout(() => {
       this.rl = readline.createInterface({
         input: process.stdin,
@@ -731,7 +738,9 @@ export class ClaudeTermIDEServer {
           await this.processCommand(trimmed)
         }
 
-        this.rl?.prompt()
+        if (this.rl && !this.waitingForApproval) {
+          this.rl.prompt()
+        }
       })
 
       this.rl.on('SIGINT', () => {
@@ -739,9 +748,11 @@ export class ClaudeTermIDEServer {
         process.exit(0)
       })
 
-      // Show initial prompt
-      this.rl.prompt()
-    }, 100)
+      // Only show prompt if not waiting for approval
+      if (!this.waitingForApproval) {
+        this.rl.prompt()
+      }
+    }, 150)
   }
 
   private async handleApprovalChoice(choice: string): Promise<void> {
@@ -809,12 +820,19 @@ export class ClaudeTermIDEServer {
         }
       } else {
         console.log('❌ Invalid choice. Please enter y or n.')
-        console.log('📋 Approval cancelled. Use "approve" again to retry.')
+        console.log('📋 Approval cancelled. Use "/rp" again to retry.')
       }
       
     } catch (error) {
       console.error('❌ Approval process failed:', error instanceof Error ? error.message : error)
     }
+    
+    // Restore normal prompt after approval process
+    setTimeout(() => {
+      if (this.rl) {
+        this.rl.prompt()
+      }
+    }, 100)
   }
 
   private async browseFiles(workspaceFolder: string): Promise<void> {
