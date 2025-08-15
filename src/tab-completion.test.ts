@@ -82,36 +82,36 @@ describe('Tab Completion', () => {
   })
 
   describe('completeCommand', () => {
-    it('should complete single file match without command prefix', () => {
+    it('should complete single file match with command prefix', () => {
       const [completions, originalLine] = (server as any).completeCommand('/send package')
       
       expect(completions).toHaveLength(1)
-      expect(completions[0]).toBe('package.json')
+      expect(completions[0]).toBe('/send package.json')
       expect(originalLine).toBe('/send package')
     })
 
-    it('should provide common prefix for multiple matches without command prefix', () => {
+    it('should provide common prefix for multiple matches with command prefix', () => {
       const [completions] = (server as any).completeCommand('/send User')
       
-      // Should either return common prefix or all matches (no /send prefix)
+      // Should either return common prefix or all matches (with /send prefix)
       expect(completions.length).toBeGreaterThan(0)
       if (completions.length === 1) {
         // Common prefix completion
+        expect(completions[0]).toContain('/send ')
         expect(completions[0]).toContain('User')
-        expect(completions[0]).not.toContain('/send ')
       } else {
-        // All matches without command prefix
-        expect(completions).toContain('src/components/UserProfile.tsx')
-        expect(completions).toContain('src/components/UserList.tsx')
+        // All matches with command prefix
+        expect(completions).toContain('/send src/components/UserProfile.tsx')
+        expect(completions).toContain('/send src/components/UserList.tsx')
       }
     })
 
-    it('should return multiple completions without command prefix', () => {
+    it('should return multiple completions with command prefix', () => {
       const [completions] = (server as any).completeCommand('/cat ')
       
       expect(completions.length).toBeGreaterThan(1)
-      // Should be file paths, not /cat commands
-      expect(completions[0]).not.toContain('/cat ')
+      // Should include command prefix
+      expect(completions[0]).toContain('/cat ')
     })
 
     it('should handle non-file commands', () => {
@@ -126,13 +126,13 @@ describe('Tab Completion', () => {
       expect(completions).toEqual([])
     })
 
-    it('should handle /cat command without command prefix', () => {
+    it('should handle /cat command with command prefix', () => {
       const [completions] = (server as any).completeCommand('/cat user')
       
       expect(completions.length).toBeGreaterThan(0)
       expect(completions.some((c: string) => c.includes('userHelper.ts'))).toBe(true)
-      // Should not contain command prefix
-      expect(completions.every((c: string) => !c.startsWith('/cat '))).toBe(true)
+      // Should contain command prefix
+      expect(completions.every((c: string) => c.startsWith('/cat '))).toBe(true)
     })
   })
 

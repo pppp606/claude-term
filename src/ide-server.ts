@@ -541,19 +541,21 @@ export class ClaudeTermIDEServer {
           return [[], line]
         }
         
+        const commandPrefix = parts[0] + ' '
+        
         // Find common prefix for auto-completion
         if (fileHits.length === 1) {
-          // Single match: return just the file path
-          return [fileHits, line]
+          // Single match: return complete command with file path
+          return [[commandPrefix + fileHits[0]], line]
         } else {
           // Multiple matches: find common prefix
           const commonPrefix = this.findCommonPrefix(fileHits)
           if (commonPrefix && commonPrefix.length > pathPrefix.length) {
             // There's a common prefix longer than current input
-            return [[commonPrefix], line]
+            return [[commandPrefix + commonPrefix], line]
           } else {
-            // No useful common prefix, return all file paths only
-            return [fileHits, line]
+            // No useful common prefix, return all complete commands
+            return [fileHits.map(file => commandPrefix + file), line]
           }
         }
       }
@@ -720,7 +722,6 @@ export class ClaudeTermIDEServer {
       // Refresh file cache
       this.fileCache = await this.fileDiscovery.scanFiles(workspaceFolder)
       this.cacheTimestamp = now
-      console.log(`📁 File cache refreshed: ${this.fileCache.length} files`)
     } catch (error) {
       console.error('Error refreshing file cache:', error)
     }
