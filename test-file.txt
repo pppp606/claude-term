@@ -1,0 +1,3 @@
+This is a test file for Delta integration.
+It will help us create meaningful diffs for testing.
+Current version has some content.
