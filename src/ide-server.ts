@@ -9,6 +9,8 @@ import { execSync } from 'child_process'
 import * as readline from 'readline'
 import { GitReviewManager } from './git-review.js'
 import { GitPushManager } from './git-push.js'
+import { FileDiscovery, FileInfo } from './file-discovery.js'
+import { FuzzySearch } from './fuzzy-search.js'
 
 export interface IDEServerOptions {
   port?: number
@@ -26,11 +28,18 @@ export class ClaudeTermIDEServer {
   private gitReview: GitReviewManager
   private gitPush: GitPushManager
   private waitingForApproval: boolean = false
+  private fileDiscovery: FileDiscovery
+  private fuzzySearch: FuzzySearch
+  private fileCache: FileInfo[] = []
+  private cacheTimestamp: number = 0
+  private readonly CACHE_TTL = 30000 // 30 seconds
 
   constructor(private options: IDEServerOptions = {}) {
     this.authToken = randomUUID()
     this.gitReview = new GitReviewManager()
     this.gitPush = new GitPushManager()
+    this.fileDiscovery = new FileDiscovery()
+    this.fuzzySearch = new FuzzySearch()
   }
 
   async start(): Promise<number> {
@@ -55,6 +64,9 @@ export class ClaudeTermIDEServer {
 
           // Create lock file
           this.createLockFile()
+
+          // Initialize file cache
+          this.initializeFileCache()
 
           resolve(this.port)
         } else {
@@ -305,10 +317,10 @@ export class ClaudeTermIDEServer {
   private async handleReviewPushTool(_params: any): Promise<string> {
     try {
       console.log('\n🔍 Claude Code requested commit review...')
-      
+
       // Execute the review-push workflow
       await this.handleReviewPushCommand()
-      
+
       return 'Review-push workflow initiated. User will see commit review in less pager and can approve/reject with y/n.'
     } catch (error) {
       const errorMsg = `Failed to initiate review-push: ${error instanceof Error ? error.message : error}`
@@ -510,7 +522,16 @@ export class ClaudeTermIDEServer {
   }
 
   private completeCommand(line: string): [string[], string] {
-    const commands = ['/help', '/send ', '/browse', '/cat ', '/search ', '/active', '/quit', '/review-push', '/rp']
+    const commands = [
+      '/help',
+      '/send ',
+      '/cat ',
+      '/search ',
+      '/active',
+      '/quit',
+      '/review-push',
+      '/rp',
+    ]
 
     const hits = commands.filter((cmd) => cmd.startsWith(line))
 
@@ -519,7 +540,7 @@ export class ClaudeTermIDEServer {
       const parts = line.split(' ')
       if (parts.length >= 2) {
         const pathPrefix = parts.slice(1).join(' ')
-        const fileHits = this.getFileCompletions(pathPrefix)
+        const fileHits = this.getFileCompletionsSync(pathPrefix)
         const prefix = parts[0] + ' '
         return [fileHits.map((f) => prefix + f), line]
       }
@@ -528,7 +549,31 @@ export class ClaudeTermIDEServer {
     return [hits.length ? hits : commands, line]
   }
 
-  private getFileCompletions(pathPrefix: string): string[] {
+  private getFileCompletionsSync(pathPrefix: string): string[] {
+    // Use cached files for sync completion
+    if (this.fileCache.length === 0) {
+      // Fallback to basic directory listing for immediate response
+      return this.getBasicFileCompletions(pathPrefix)
+    }
+    
+    try {
+      const searchResults = this.fuzzySearch.search(pathPrefix, this.fileCache, 10)
+      
+      return searchResults.map((result) => {
+        const file = result.file
+        // Add trailing slash for directories
+        if (fs.existsSync(file.absolutePath) && fs.statSync(file.absolutePath).isDirectory()) {
+          return file.relativePath + '/'
+        }
+        return file.relativePath
+      })
+    } catch (error) {
+      console.error('Error getting sync file completions:', error)
+      return this.getBasicFileCompletions(pathPrefix)
+    }
+  }
+
+  private getBasicFileCompletions(pathPrefix: string): string[] {
     try {
       const workspaceFolder = this.options.workspaceFolder || process.cwd()
       const fullPrefix = path.resolve(workspaceFolder, pathPrefix || '.')
@@ -558,12 +603,38 @@ export class ClaudeTermIDEServer {
     }
   }
 
+  private initializeFileCache(): void {
+    // Initialize file cache in background
+    const workspaceFolder = this.options.workspaceFolder || process.cwd()
+    this.refreshFileCache(workspaceFolder).catch((error) => {
+      console.error('Failed to initialize file cache:', error)
+    })
+  }
+
+  private async refreshFileCache(workspaceFolder: string): Promise<void> {
+    const now = Date.now()
+    
+    // Check if cache is still fresh
+    if (this.fileCache.length > 0 && (now - this.cacheTimestamp) < this.CACHE_TTL) {
+      return
+    }
+    
+    try {
+      // Refresh file cache
+      this.fileCache = await this.fileDiscovery.scanFiles(workspaceFolder)
+      this.cacheTimestamp = now
+      console.log(`📁 File cache refreshed: ${this.fileCache.length} files`)
+    } catch (error) {
+      console.error('Error refreshing file cache:', error)
+    }
+  }
+
   private async processCommand(command: string): Promise<void> {
     const trimmed = command.trim()
     const workspaceFolder = this.options.workspaceFolder || process.cwd()
-    
+
     // Note: approval handling is now done via questionInterface in handleReviewPushCommand
-    
+
     // Check if command is being entered while we expected approval (edge case)
     if (this.waitingForApproval && !['y', 'n', 'yes', 'no'].includes(trimmed.toLowerCase())) {
       this.waitingForApproval = false
@@ -586,8 +657,6 @@ export class ClaudeTermIDEServer {
       process.exit(0)
     } else if (trimmed === '/active') {
       this.showActiveFiles()
-    } else if (trimmed === '/browse') {
-      await this.browseFiles(workspaceFolder)
     } else if (trimmed.startsWith('/cat ')) {
       const filePath = trimmed.substring(5).trim()
       if (filePath) {
@@ -628,37 +697,39 @@ export class ClaudeTermIDEServer {
         this.rl.close()
         this.rl = null
       }
-      
+
       await this.gitReview.displayCommitReview()
-      
+
       // Get current branch for prompt
       const currentBranch = execSync('git branch --show-current', { encoding: 'utf8' }).trim()
-      
+
       // Use a simple question approach without recreating full readline
       this.waitingForApproval = true
-      
+
       // Create a temporary readline just for the question
       const questionInterface = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
       })
-      
-      questionInterface.question(`\n❓ push to origin/${currentBranch}? (y/n): `, async (answer) => {
-        questionInterface.close()
-        
-        // Process the answer
-        await this.handleApprovalChoice(answer.trim())
-        
-        // Recreate the main readline interface after processing
-        if (wasReadlineActive) {
-          this.createReadlineInterface()
-        }
-      })
-      
+
+      questionInterface.question(
+        `\n❓ push to origin/${currentBranch}? (y/n): `,
+        async (answer) => {
+          questionInterface.close()
+
+          // Process the answer
+          await this.handleApprovalChoice(answer.trim())
+
+          // Recreate the main readline interface after processing
+          if (wasReadlineActive) {
+            this.createReadlineInterface()
+          }
+        },
+      )
     } catch (error) {
       console.error('❌ Failed to review commit:', error instanceof Error ? error.message : error)
       this.waitingForApproval = false
-      
+
       // Make sure to recreate readline on error
       if (!this.rl) {
         this.createReadlineInterface()
@@ -672,7 +743,7 @@ export class ClaudeTermIDEServer {
       process.stdin.pause()
       process.stdin.resume()
     }
-    
+
     // Small delay to ensure terminal state is clean
     setTimeout(() => {
       this.rl = readline.createInterface({
@@ -710,17 +781,16 @@ export class ClaudeTermIDEServer {
     this.waitingForApproval = false
 
     try {
-      
       if (choice === 'y' || choice === 'yes') {
         console.log('\n🚀 Initiating push workflow...')
-        
+
         // Get current branch name
         const currentBranch = execSync('git branch --show-current', {
-          encoding: 'utf8'
+          encoding: 'utf8',
         }).trim()
-        
+
         const pushResult = await this.gitPush.autoPushFlow(currentBranch, true)
-        
+
         if (pushResult.success && pushResult.pushed) {
           console.log(`\n🎉 ${pushResult.message}`)
         } else if (pushResult.success && !pushResult.pushed) {
@@ -730,41 +800,45 @@ export class ClaudeTermIDEServer {
         }
       } else if (choice === 'n' || choice === 'no') {
         console.log('\n🔄 Rejecting commit and undoing...')
-        
+
         try {
           // Get unpushed commit count to reset
           const unpushedCount = await this.gitReview.getUnpushedCommitCount()
-          
+
           if (unpushedCount === 0) {
             console.log('⚠️  No unpushed commits to undo.')
             return
           }
-          
+
           // Show current commit hash before reset
           const currentCommit = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim()
           console.log(`📍 Current commit: ${currentCommit.substring(0, 8)}`)
-          console.log(`🔄 Undoing ${unpushedCount} unpushed commit${unpushedCount > 1 ? 's' : ''}...`)
-          
+          console.log(
+            `🔄 Undoing ${unpushedCount} unpushed commit${unpushedCount > 1 ? 's' : ''}...`,
+          )
+
           // Reset to before unpushed commits but keep changes in working directory
           const resetCommand = `git reset --soft HEAD~${unpushedCount}`
           console.log(`🔧 Executing: ${resetCommand}`)
           const resetResult = execSync(resetCommand, {
-            encoding: 'utf8'
+            encoding: 'utf8',
           })
           console.log(`✅ Reset soft result: ${resetResult || 'Success (no output)'}`)
-          
+
           // Unstage all changes
           console.log('🔧 Executing: git reset')
           const unstageResult = execSync('git reset', {
-            encoding: 'utf8'
+            encoding: 'utf8',
           })
           console.log(`✅ Unstage result: ${unstageResult || 'Success (no output)'}`)
-          
+
           // Show final status
           const finalCommit = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim()
           console.log(`📍 Final commit: ${finalCommit.substring(0, 8)}`)
-          
-          console.log(`✅ ${unpushedCount} commit${unpushedCount > 1 ? 's' : ''} undone successfully`)
+
+          console.log(
+            `✅ ${unpushedCount} commit${unpushedCount > 1 ? 's' : ''} undone successfully`,
+          )
           console.log('📝 Changes remain in working directory (unstaged)')
         } catch (error) {
           console.error('❌ Failed to undo commit:', error instanceof Error ? error.message : error)
@@ -773,66 +847,9 @@ export class ClaudeTermIDEServer {
         console.log('❌ Invalid choice. Please enter y or n.')
         console.log('📋 Approval cancelled. Use "/rp" again to retry.')
       }
-      
     } catch (error) {
       console.error('❌ Approval process failed:', error instanceof Error ? error.message : error)
     }
-  }
-
-  private async browseFiles(workspaceFolder: string): Promise<void> {
-    try {
-      console.log('\n📁 Browsing files with fzf...')
-      const selectedFile = execSync(
-        'find . -type f -not -path "./node_modules/*" -not -path "./.git/*" | fzf --preview="bat --color=always --style=header,grid --line-range :300 {}"',
-        {
-          encoding: 'utf8',
-          stdio: ['inherit', 'pipe', 'inherit'],
-          cwd: workspaceFolder,
-        },
-      ).trim()
-
-      if (selectedFile) {
-        console.log(`\n📋 Selected: ${selectedFile}`)
-        console.log('Choose action:')
-        console.log('1) View file (/cat)')
-        console.log('2) Send to Claude (/send)')
-        console.log('3) Cancel')
-
-        // Get user choice using readline
-        const choice = await this.promptUser('Enter choice (1-3): ')
-
-        const fullPath = path.resolve(workspaceFolder, selectedFile)
-        switch (choice) {
-          case '1':
-            await this.displayFileInteractive(fullPath)
-            break
-          case '2':
-            if (this.connectedWS) {
-              this.sendFileToClient(fullPath)
-            } else {
-              console.log('No Claude Code client connected')
-            }
-            break
-          case '3':
-          default:
-            console.log('Cancelled')
-            break
-        }
-      }
-    } catch (error) {
-      console.log('⚠️  fzf not available or no file selected')
-      console.log('Install fzf: brew install fzf (macOS) or apt install fzf (Ubuntu)')
-    }
-  }
-
-  private promptUser(question: string): Promise<string> {
-    return new Promise((resolve) => {
-      if (this.rl) {
-        this.rl.question(question, (answer) => {
-          resolve(answer.trim())
-        })
-      }
-    })
   }
 
   private searchCode(pattern: string, workspaceFolder: string): void {
