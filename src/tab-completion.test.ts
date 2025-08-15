@@ -82,35 +82,36 @@ describe('Tab Completion', () => {
   })
 
   describe('completeCommand', () => {
-    it('should complete single file match', () => {
+    it('should complete single file match without command prefix', () => {
       const [completions, originalLine] = (server as any).completeCommand('/send package')
       
       expect(completions).toHaveLength(1)
-      expect(completions[0]).toBe('/send package.json')
+      expect(completions[0]).toBe('package.json')
       expect(originalLine).toBe('/send package')
     })
 
-    it('should provide common prefix for multiple matches', () => {
+    it('should provide common prefix for multiple matches without command prefix', () => {
       const [completions] = (server as any).completeCommand('/send User')
       
-      // Should either return common prefix or all matches
+      // Should either return common prefix or all matches (no /send prefix)
       expect(completions.length).toBeGreaterThan(0)
       if (completions.length === 1) {
         // Common prefix completion
-        expect(completions[0]).toContain('/send ')
         expect(completions[0]).toContain('User')
+        expect(completions[0]).not.toContain('/send ')
       } else {
-        // All matches
-        expect(completions).toContain('/send src/components/UserProfile.tsx')
-        expect(completions).toContain('/send src/components/UserList.tsx')
+        // All matches without command prefix
+        expect(completions).toContain('src/components/UserProfile.tsx')
+        expect(completions).toContain('src/components/UserList.tsx')
       }
     })
 
-    it('should return multiple completions when no common prefix', () => {
+    it('should return multiple completions without command prefix', () => {
       const [completions] = (server as any).completeCommand('/cat ')
       
       expect(completions.length).toBeGreaterThan(1)
-      expect(completions[0]).toContain('/cat ')
+      // Should be file paths, not /cat commands
+      expect(completions[0]).not.toContain('/cat ')
     })
 
     it('should handle non-file commands', () => {
@@ -125,23 +126,25 @@ describe('Tab Completion', () => {
       expect(completions).toEqual([])
     })
 
-    it('should handle /cat command', () => {
+    it('should handle /cat command without command prefix', () => {
       const [completions] = (server as any).completeCommand('/cat user')
       
       expect(completions.length).toBeGreaterThan(0)
       expect(completions.some((c: string) => c.includes('userHelper.ts'))).toBe(true)
+      // Should not contain command prefix
+      expect(completions.every((c: string) => !c.startsWith('/cat '))).toBe(true)
     })
   })
 
   describe('getFileCompletionsSync', () => {
-    it('should return fuzzy search results', () => {
+    it('should return filename prefix matches only', () => {
       const completions = (server as any).getFileCompletionsSync('user')
       
       expect(completions.length).toBeGreaterThan(0)
       expect(completions).toContain('src/utils/userHelper.ts')
     })
 
-    it('should return exact matches with high priority', () => {
+    it('should return exact filename matches', () => {
       const completions = (server as any).getFileCompletionsSync('package.json')
       
       expect(completions[0]).toBe('package.json')
@@ -154,12 +157,80 @@ describe('Tab Completion', () => {
       expect(completions.length).toBeLessThanOrEqual(10)
     })
 
-    it('should handle partial file names', () => {
+    it('should match filename prefix (case insensitive)', () => {
       const completions = (server as any).getFileCompletionsSync('User')
       
       expect(completions.length).toBeGreaterThan(0)
       expect(completions.some((c: string) => c.includes('UserProfile.tsx'))).toBe(true)
       expect(completions.some((c: string) => c.includes('UserList.tsx'))).toBe(true)
+    })
+
+    it('should exclude .git files', () => {
+      // Add a mock .git file to test exclusion
+      const mockGitFile: FileInfo = {
+        absolutePath: '/project/.git/config',
+        relativePath: '.git/config',
+        name: 'config',
+        extension: '',
+        directory: '.git',
+        size: 100,
+        lastModified: new Date(),
+      }
+      ;(server as any).fileCache.push(mockGitFile)
+      
+      const completions = (server as any).getFileCompletionsSync('config')
+      
+      // Should not include .git/config
+      expect(completions.every((c: string) => !c.startsWith('.git/'))).toBe(true)
+    })
+
+    it('should sort by filename length then alphabetically', () => {
+      const completions = (server as any).getFileCompletionsSync('User')
+      
+      if (completions.length > 1) {
+        // First should be shorter or same length, then alphabetical
+        const firstLen = completions[0].split('/').pop()?.length || 0
+        const secondLen = completions[1].split('/').pop()?.length || 0
+        expect(firstLen).toBeLessThanOrEqual(secondLen)
+      }
+    })
+
+    it('should exclude gitignored patterns like node_modules and dist', () => {
+      // Add mock files that should be ignored by .gitignore
+      const mockIgnoredFiles: FileInfo[] = [
+        {
+          absolutePath: '/project/node_modules/package/index.js',
+          relativePath: 'node_modules/package/index.js',
+          name: 'index.js',
+          extension: '.js',
+          directory: 'node_modules/package',
+          size: 100,
+          lastModified: new Date(),
+        },
+        {
+          absolutePath: '/project/dist/bundle.js',
+          relativePath: 'dist/bundle.js',
+          name: 'bundle.js',
+          extension: '.js',
+          directory: 'dist',
+          size: 200,
+          lastModified: new Date(),
+        },
+      ]
+      
+      // Note: In real usage, these files would already be filtered out by FileDiscovery
+      // This test verifies that if they somehow made it to cache, they'd be filtered out
+      const originalCache = (server as any).fileCache
+      ;(server as any).fileCache = [...originalCache, ...mockIgnoredFiles]
+      
+      const completions = (server as any).getFileCompletionsSync('index')
+      
+      // Should not include node_modules or dist files
+      expect(completions.every((c: string) => !c.startsWith('node_modules/'))).toBe(true)
+      expect(completions.every((c: string) => !c.startsWith('dist/'))).toBe(true)
+      
+      // Restore original cache
+      ;(server as any).fileCache = originalCache
     })
   })
 })

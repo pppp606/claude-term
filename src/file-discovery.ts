@@ -78,6 +78,11 @@ export class FileDiscovery {
   }
 
   private isIgnored(relativePath: string): boolean {
+    // Always ignore .git directory
+    if (relativePath.startsWith('.git/') || relativePath === '.git') {
+      return true
+    }
+
     for (const pattern of this.gitignorePatterns) {
       if (this.matchesGitignorePattern(relativePath, pattern)) {
         return true

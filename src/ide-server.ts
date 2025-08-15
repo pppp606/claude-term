@@ -10,7 +10,6 @@ import * as readline from 'readline'
 import { GitReviewManager } from './git-review.js'
 import { GitPushManager } from './git-push.js'
 import { FileDiscovery, FileInfo } from './file-discovery.js'
-import { FuzzySearch } from './fuzzy-search.js'
 
 export interface IDEServerOptions {
   port?: number
@@ -29,7 +28,6 @@ export class ClaudeTermIDEServer {
   private gitPush: GitPushManager
   private waitingForApproval: boolean = false
   private fileDiscovery: FileDiscovery
-  private fuzzySearch: FuzzySearch
   private fileCache: FileInfo[] = []
   private cacheTimestamp: number = 0
   private readonly CACHE_TTL = 30000 // 30 seconds
@@ -39,7 +37,6 @@ export class ClaudeTermIDEServer {
     this.gitReview = new GitReviewManager()
     this.gitPush = new GitPushManager()
     this.fileDiscovery = new FileDiscovery()
-    this.fuzzySearch = new FuzzySearch()
   }
 
   async start(): Promise<number> {
@@ -539,28 +536,24 @@ export class ClaudeTermIDEServer {
       if (parts.length >= 2) {
         const pathPrefix = parts.slice(1).join(' ')
         const fileHits = this.getFileCompletionsSync(pathPrefix)
-        const commandPrefix = parts[0] + ' '
         
         if (fileHits.length === 0) {
-          return [[], pathPrefix]
+          return [[], line]
         }
-        
-        // For tab completion, return full command + file paths
-        const completions = fileHits.map((f) => commandPrefix + f)
         
         // Find common prefix for auto-completion
         if (fileHits.length === 1) {
-          // Single match: return the complete command
-          return [completions, line]
+          // Single match: return just the file path
+          return [fileHits, line]
         } else {
           // Multiple matches: find common prefix
           const commonPrefix = this.findCommonPrefix(fileHits)
           if (commonPrefix && commonPrefix.length > pathPrefix.length) {
             // There's a common prefix longer than current input
-            return [[commandPrefix + commonPrefix], line]
+            return [[commonPrefix], line]
           } else {
-            // No useful common prefix, return all matches
-            return [completions, line]
+            // No useful common prefix, return all file paths only
+            return [fileHits, line]
           }
         }
       }
@@ -597,24 +590,71 @@ export class ClaudeTermIDEServer {
     }
     
     try {
+      // Filter files: exclude .git, hidden files, and common gitignore patterns
+      const visibleFiles = this.fileCache.filter((file) => {
+        const path = file.relativePath
+        
+        // Exclude .git directory and hidden files (except .env.example pattern)
+        if (path.startsWith('.git/') || (path.startsWith('.') && !path.match(/^\.env\.example$/))) {
+          return false
+        }
+        
+        // Extra safety: exclude common patterns in case they slip through FileDiscovery
+        const commonIgnorePatterns = [
+          'node_modules/',
+          'dist/',
+          'coverage/',
+          '.nyc_output/',
+          'build/',
+          '.cache/',
+          '.next/',
+          '.nuxt/',
+          '.serverless/',
+          '.vscode-test/',
+        ]
+        
+        if (commonIgnorePatterns.some(pattern => path.startsWith(pattern))) {
+          return false
+        }
+        
+        return true
+      })
+
       // For empty prefix, return some recent/relevant files
       if (!pathPrefix.trim()) {
-        return this.fileCache
+        return visibleFiles
           .slice(0, 10)
           .map((file) => {
-            if (fs.existsSync(file.absolutePath) && fs.statSync(file.absolutePath).isDirectory()) {
-              return file.relativePath + '/'
+            try {
+              if (fs.existsSync(file.absolutePath) && fs.statSync(file.absolutePath).isDirectory()) {
+                return file.relativePath + '/'
+              }
+            } catch {
+              // Ignore stat errors, treat as file
             }
             return file.relativePath
           })
           .sort()
       }
 
-      const searchResults = this.fuzzySearch.search(pathPrefix, this.fileCache, 15)
-      
-      return searchResults.map((result) => {
-        const file = result.file
-        // Add trailing slash for directories
+      // For prefix matching: match against filename only (not full path)
+      const matchingFiles = visibleFiles.filter((file) => {
+        return file.name.toLowerCase().startsWith(pathPrefix.toLowerCase())
+      })
+
+      // Sort by filename length (shorter matches first), then alphabetically
+      const sortedFiles = matchingFiles
+        .sort((a, b) => {
+          const aNameLen = a.name.length
+          const bNameLen = b.name.length
+          if (aNameLen !== bNameLen) {
+            return aNameLen - bNameLen
+          }
+          return a.name.localeCompare(b.name)
+        })
+        .slice(0, 15)
+
+      return sortedFiles.map((file) => {
         try {
           if (fs.existsSync(file.absolutePath) && fs.statSync(file.absolutePath).isDirectory()) {
             return file.relativePath + '/'
