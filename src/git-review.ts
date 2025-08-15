@@ -225,30 +225,20 @@ export class GitReviewManager {
       // Try to use less with proper terminal handling
       try {
         const { spawn } = await import('child_process')
-        const { writeFileSync, unlinkSync } = await import('fs')
-        const { join } = await import('path')
-        const { tmpdir } = await import('os')
         
-        // Create temp file for less to read
-        const tempFile = join(tmpdir(), `claude-commit-review-${Date.now()}.txt`)
-        writeFileSync(tempFile, content)
-        
-        // Create less process with full stdio inheritance and better options
-        const less = spawn('less', ['-R', '-X', tempFile], {
-          stdio: 'inherit',
+        // Create less process with stdin instead of file to avoid showing path
+        const less = spawn('less', ['-R', '-X'], {
+          stdio: ['pipe', 'inherit', 'inherit'],
           detached: false
         })
+        
+        // Write content to less stdin
+        less.stdin.write(content)
+        less.stdin.end()
         
         // Return a promise that resolves when less exits
         return new Promise((resolve, reject) => {
           less.on('close', (code) => {
-            // Clean up temp file
-            try {
-              unlinkSync(tempFile)
-            } catch (error) {
-              // Ignore cleanup errors
-            }
-            
             if (code === 0 || code === null) {
               resolve()
             } else {
@@ -257,12 +247,6 @@ export class GitReviewManager {
           })
           
           less.on('error', (error) => {
-            // Clean up temp file on error
-            try {
-              unlinkSync(tempFile)
-            } catch (cleanupError) {
-              // Ignore cleanup errors
-            }
             reject(error)
           })
         })
