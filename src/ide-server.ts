@@ -533,20 +533,60 @@ export class ClaudeTermIDEServer {
       '/rp',
     ]
 
-    const hits = commands.filter((cmd) => cmd.startsWith(line))
-
     // If we have file path completion for /cat or /send
     if (line.startsWith('/cat ') || line.startsWith('/send ')) {
       const parts = line.split(' ')
       if (parts.length >= 2) {
         const pathPrefix = parts.slice(1).join(' ')
         const fileHits = this.getFileCompletionsSync(pathPrefix)
-        const prefix = parts[0] + ' '
-        return [fileHits.map((f) => prefix + f), line]
+        const commandPrefix = parts[0] + ' '
+        
+        if (fileHits.length === 0) {
+          return [[], pathPrefix]
+        }
+        
+        // For tab completion, return full command + file paths
+        const completions = fileHits.map((f) => commandPrefix + f)
+        
+        // Find common prefix for auto-completion
+        if (fileHits.length === 1) {
+          // Single match: return the complete command
+          return [completions, line]
+        } else {
+          // Multiple matches: find common prefix
+          const commonPrefix = this.findCommonPrefix(fileHits)
+          if (commonPrefix && commonPrefix.length > pathPrefix.length) {
+            // There's a common prefix longer than current input
+            return [[commandPrefix + commonPrefix], line]
+          } else {
+            // No useful common prefix, return all matches
+            return [completions, line]
+          }
+        }
       }
     }
 
+    const hits = commands.filter((cmd) => cmd.startsWith(line))
     return [hits.length ? hits : commands, line]
+  }
+
+  private findCommonPrefix(strings: string[]): string {
+    if (strings.length === 0) return ''
+    if (strings.length === 1) return strings[0]
+
+    let prefix = ''
+    const firstString = strings[0]
+    
+    for (let i = 0; i < firstString.length; i++) {
+      const char = firstString[i]
+      if (strings.every(str => str[i] === char)) {
+        prefix += char
+      } else {
+        break
+      }
+    }
+    
+    return prefix
   }
 
   private getFileCompletionsSync(pathPrefix: string): string[] {
@@ -557,13 +597,30 @@ export class ClaudeTermIDEServer {
     }
     
     try {
-      const searchResults = this.fuzzySearch.search(pathPrefix, this.fileCache, 10)
+      // For empty prefix, return some recent/relevant files
+      if (!pathPrefix.trim()) {
+        return this.fileCache
+          .slice(0, 10)
+          .map((file) => {
+            if (fs.existsSync(file.absolutePath) && fs.statSync(file.absolutePath).isDirectory()) {
+              return file.relativePath + '/'
+            }
+            return file.relativePath
+          })
+          .sort()
+      }
+
+      const searchResults = this.fuzzySearch.search(pathPrefix, this.fileCache, 15)
       
       return searchResults.map((result) => {
         const file = result.file
         // Add trailing slash for directories
-        if (fs.existsSync(file.absolutePath) && fs.statSync(file.absolutePath).isDirectory()) {
-          return file.relativePath + '/'
+        try {
+          if (fs.existsSync(file.absolutePath) && fs.statSync(file.absolutePath).isDirectory()) {
+            return file.relativePath + '/'
+          }
+        } catch {
+          // Ignore stat errors, treat as file
         }
         return file.relativePath
       })
