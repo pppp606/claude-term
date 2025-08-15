@@ -7,6 +7,8 @@ import os from 'os'
 import { randomUUID } from 'crypto'
 import { execSync } from 'child_process'
 import * as readline from 'readline'
+import { GitReviewManager } from './git-review.js'
+import { GitPushManager } from './git-push.js'
 
 export interface IDEServerOptions {
   port?: number
@@ -21,9 +23,14 @@ export class ClaudeTermIDEServer {
   private authToken: string = ''
   private connectedWS: WebSocket | null = null
   private rl: readline.Interface | null = null
+  private gitReview: GitReviewManager
+  private gitPush: GitPushManager
+  private pendingCommitReview: boolean = false
 
   constructor(private options: IDEServerOptions = {}) {
     this.authToken = randomUUID()
+    this.gitReview = new GitReviewManager()
+    this.gitPush = new GitPushManager()
   }
 
   async start(): Promise<number> {
@@ -147,7 +154,6 @@ export class ClaudeTermIDEServer {
       console.error('🔥 WebSocket error:', error)
     })
   }
-
 
   private handleInitialize(ws: WebSocket, message: any): void {
     const response = {
@@ -534,15 +540,7 @@ export class ClaudeTermIDEServer {
   }
 
   private completeCommand(line: string): [string[], string] {
-    const commands = [
-      '/help',
-      '/send ',
-      '/browse',
-      '/cat ',
-      '/search ',
-      '/active',
-      '/quit',
-    ]
+    const commands = ['/help', '/send ', '/browse', '/cat ', '/search ', '/active', '/quit', '/push', 'approve']
 
     const hits = commands.filter((cmd) => cmd.startsWith(line))
 
@@ -593,6 +591,12 @@ export class ClaudeTermIDEServer {
   private async processCommand(command: string): Promise<void> {
     const trimmed = command.trim()
     const workspaceFolder = this.options.workspaceFolder || process.cwd()
+    
+    // Clear pending commit review if user runs other commands (except approve)
+    if (this.pendingCommitReview && trimmed !== 'approve') {
+      this.pendingCommitReview = false
+      console.log('📋 Commit review cancelled.')
+    }
 
     if (trimmed === '/help') {
       console.log('Available commands:')
@@ -601,6 +605,8 @@ export class ClaudeTermIDEServer {
       console.log('  /cat <path> - Display file interactively, select text to send to Claude')
       console.log('  /search <pattern> - Search code with ripgrep')
       console.log('  /active - Show active files (resources)')
+      console.log('  /push - Review latest commit and prepare for push')
+      console.log('  approve - Approve and push the reviewed commit')
       console.log('  /help - Show this help message')
       console.log('  /quit - Stop the server and exit')
     } else if (trimmed === '/quit') {
@@ -635,9 +641,61 @@ export class ClaudeTermIDEServer {
       } else {
         console.log('Usage: /send <path>')
       }
+    } else if (trimmed === '/push') {
+      await this.handlePushCommand()
+    } else if (trimmed === 'approve') {
+      await this.handleApproveCommand()
     } else if (trimmed.startsWith('/')) {
       console.log(`Unknown command: ${trimmed}`)
       console.log('Type /help for available commands')
+    }
+  }
+
+  private async handlePushCommand(): Promise<void> {
+    try {
+      console.log('\n🔍 Reviewing latest commit for push...')
+      console.log('═'.repeat(50))
+      
+      await this.gitReview.displayCommitReview()
+      
+      this.pendingCommitReview = true
+      console.log('\n💡 Type "approve" to push this commit or any other command to cancel')
+      console.log('───────────────────────────────────────────────')
+    } catch (error) {
+      console.error('❌ Failed to review commit:', error instanceof Error ? error.message : error)
+      this.pendingCommitReview = false
+    }
+  }
+
+  private async handleApproveCommand(): Promise<void> {
+    if (!this.pendingCommitReview) {
+      console.log('⚠️  No commit pending review. Use /push first to review a commit.')
+      return
+    }
+
+    try {
+      console.log('\n🚀 Initiating push workflow...')
+      
+      // Get current branch name
+      const currentBranch = execSync('git branch --show-current', {
+        encoding: 'utf8'
+      }).trim()
+      
+      const pushResult = await this.gitPush.autoPushFlow(currentBranch)
+      
+      if (pushResult.success && pushResult.pushed) {
+        console.log(`\n🎉 ${pushResult.message}`)
+      } else if (pushResult.success && !pushResult.pushed) {
+        console.log(`\n📋 ${pushResult.message}`)
+      } else {
+        console.error(`\n❌ ${pushResult.message}`)
+      }
+      
+    } catch (error) {
+      console.error('❌ Push failed:', error instanceof Error ? error.message : error)
+    } finally {
+      this.pendingCommitReview = false
+      console.log('───────────────────────────────────────────────')
     }
   }
 
@@ -696,7 +754,6 @@ export class ClaudeTermIDEServer {
       }
     })
   }
-
 
   private searchCode(pattern: string, workspaceFolder: string): void {
     try {
@@ -759,7 +816,6 @@ export class ClaudeTermIDEServer {
     console.log(`\nTotal: ${this.activeFiles.size} file(s)`)
     console.log('Claude Code can access these files via resources API\n')
   }
-
 
   private sendFileToClient(filePath: string): void {
     try {
@@ -868,7 +924,7 @@ export class ClaudeTermIDEServer {
       }
 
       const content = fs.readFileSync(filePath, 'utf8')
-      
+
       console.log(`\n📄 Interactive File Selector: ${path.basename(filePath)}`)
       console.log('📝 Instructions:')
       console.log('  • Use ↑↓ arrows or j/k to navigate')
@@ -877,7 +933,6 @@ export class ClaudeTermIDEServer {
       console.log('  • Press Esc to cancel\n')
 
       await this.selectLinesWithFzf(filePath, content)
-
     } catch (error) {
       console.error('Error in interactive file display:', error)
     }
@@ -886,16 +941,16 @@ export class ClaudeTermIDEServer {
   private async selectLinesWithFzf(filePath: string, content: string): Promise<void> {
     try {
       const lines = content.split('\n')
-      
+
       // Create temporary file with numbered lines for fzf
       const tmpDir = os.tmpdir()
       const tmpFile = path.join(tmpDir, `claude-term-lines-${randomUUID()}.txt`)
-      
+
       // Format lines with line numbers
-      const numberedLines = lines.map((line, index) => 
-        `${(index + 1).toString().padStart(4, ' ')}: ${line}`
-      ).join('\n')
-      
+      const numberedLines = lines
+        .map((line, index) => `${(index + 1).toString().padStart(4, ' ')}: ${line}`)
+        .join('\n')
+
       fs.writeFileSync(tmpFile, numberedLines)
 
       // Use fzf for line selection - simple and reliable
@@ -909,7 +964,7 @@ export class ClaudeTermIDEServer {
 
       console.log('🔍 Opening fzf line selector...')
       console.log('💡 Select lines with Tab, press Enter to send to Claude')
-      
+
       const selectedLines = execSync(fzfCommand, {
         encoding: 'utf8',
         stdio: ['inherit', 'pipe', 'inherit'],
@@ -923,7 +978,6 @@ export class ClaudeTermIDEServer {
       } else {
         console.log('❌ No lines selected')
       }
-
     } catch (error) {
       if (error instanceof Error && error.message.includes('Command failed')) {
         console.log('❌ Selection cancelled or fzf not available')
@@ -934,16 +988,22 @@ export class ClaudeTermIDEServer {
     }
   }
 
-  private async processFzfSelection(filePath: string, content: string, selectedLines: string): Promise<void> {
+  private async processFzfSelection(
+    filePath: string,
+    content: string,
+    selectedLines: string,
+  ): Promise<void> {
     try {
       const lines = content.split('\n')
       const selections = selectedLines.split('\n')
-      
+
       // Extract line numbers from fzf output
-      const lineNumbers = selections.map(line => {
-        const match = line.match(/^\s*(\d+):/)
-        return match ? parseInt(match[1]) - 1 : -1 // Convert to 0-based
-      }).filter(num => num >= 0)
+      const lineNumbers = selections
+        .map((line) => {
+          const match = line.match(/^\s*(\d+):/)
+          return match ? parseInt(match[1]) - 1 : -1 // Convert to 0-based
+        })
+        .filter((num) => num >= 0)
 
       if (lineNumbers.length === 0) {
         console.log('❌ No valid lines selected')
@@ -954,7 +1014,7 @@ export class ClaudeTermIDEServer {
       lineNumbers.sort((a, b) => a - b)
 
       // Get selected text
-      const selectedText = lineNumbers.map(lineNum => lines[lineNum]).join('\n')
+      const selectedText = lineNumbers.map((lineNum) => lines[lineNum]).join('\n')
       const startLine = lineNumbers[0]
       const endLine = lineNumbers[lineNumbers.length - 1]
 
@@ -963,7 +1023,7 @@ export class ClaudeTermIDEServer {
         return
       }
 
-      // Send selection_changed event to Claude Code  
+      // Send selection_changed event to Claude Code
       const selectionMessage = {
         jsonrpc: '2.0',
         method: 'selection_changed',
@@ -971,22 +1031,23 @@ export class ClaudeTermIDEServer {
           filePath: filePath,
           selection: {
             start: { line: startLine, character: 0 },
-            end: { line: endLine, character: lines[endLine]?.length || 0 }
+            end: { line: endLine, character: lines[endLine]?.length || 0 },
           },
           text: content,
-          selectedText: selectedText
-        }
+          selectedText: selectedText,
+        },
       }
 
       console.log(`\n📤 Sending selection to Claude Code:`)
-      console.log(`📄 File: ${path.relative(this.options.workspaceFolder || process.cwd(), filePath)}`)
+      console.log(
+        `📄 File: ${path.relative(this.options.workspaceFolder || process.cwd(), filePath)}`,
+      )
       console.log(`📍 Lines: ${startLine + 1}-${endLine + 1}`)
       console.log(`📝 Selected text (${selectedText.length} chars):`)
       console.log(selectedText.substring(0, 200) + (selectedText.length > 200 ? '...' : ''))
 
       this.connectedWS.send(JSON.stringify(selectionMessage))
       console.log(`\n✅ Selection sent to Claude Code!`)
-
     } catch (error) {
       console.error('Error processing fzf selection:', error)
     }
