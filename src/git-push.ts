@@ -78,7 +78,7 @@ export class GitPushManager {
     })
   }
 
-  async autoPushFlow(branchName: string): Promise<PushResult> {
+  async autoPushFlow(branchName: string, skipConfirmation = false): Promise<PushResult> {
     try {
       console.log('\n🔍 Validating push prerequisites...')
 
@@ -96,15 +96,17 @@ export class GitPushManager {
       // 2. Check if force push is required
       const requiresForcePush = await this.checkForForcePush()
 
-      // 3. Get user confirmation
-      const userConfirmed = await this.promptForPushConfirmation(branchName, requiresForcePush)
+      // 3. Get user confirmation (skip if already confirmed in review flow)
+      if (!skipConfirmation) {
+        const userConfirmed = await this.promptForPushConfirmation(branchName, requiresForcePush)
 
-      if (!userConfirmed) {
-        return {
-          success: true,
-          pushed: false,
-          message: 'Push declined by user',
-          branch: branchName,
+        if (!userConfirmed) {
+          return {
+            success: true,
+            pushed: false,
+            message: 'Push declined by user',
+            branch: branchName,
+          }
         }
       }
 

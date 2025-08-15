@@ -776,7 +776,7 @@ export class ClaudeTermIDEServer {
           encoding: 'utf8'
         }).trim()
         
-        const pushResult = await this.gitPush.autoPushFlow(currentBranch)
+        const pushResult = await this.gitPush.autoPushFlow(currentBranch, true)
         
         if (pushResult.success && pushResult.pushed) {
           console.log(`\n🎉 ${pushResult.message}`)
