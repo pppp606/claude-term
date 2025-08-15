@@ -157,7 +157,15 @@ describe('Tab Completion', () => {
       expect(completions.length).toBeLessThanOrEqual(10)
     })
 
-    it('should match filename prefix (case insensitive)', () => {
+    it('should match path prefix (case insensitive)', () => {
+      const completions = (server as any).getFileCompletionsSync('src/components/User')
+      
+      expect(completions.length).toBeGreaterThan(0)
+      expect(completions.some((c: string) => c.includes('UserProfile.tsx'))).toBe(true)
+      expect(completions.some((c: string) => c.includes('UserList.tsx'))).toBe(true)
+    })
+
+    it('should match filename prefix when no path separator', () => {
       const completions = (server as any).getFileCompletionsSync('User')
       
       expect(completions.length).toBeGreaterThan(0)
@@ -184,13 +192,13 @@ describe('Tab Completion', () => {
       expect(completions.every((c: string) => !c.startsWith('.git/'))).toBe(true)
     })
 
-    it('should sort by filename length then alphabetically', () => {
-      const completions = (server as any).getFileCompletionsSync('User')
+    it('should sort by path length then alphabetically', () => {
+      const completions = (server as any).getFileCompletionsSync('src/')
       
       if (completions.length > 1) {
         // First should be shorter or same length, then alphabetical
-        const firstLen = completions[0].split('/').pop()?.length || 0
-        const secondLen = completions[1].split('/').pop()?.length || 0
+        const firstLen = completions[0].length
+        const secondLen = completions[1].length
         expect(firstLen).toBeLessThanOrEqual(secondLen)
       }
     })
@@ -228,6 +236,52 @@ describe('Tab Completion', () => {
       // Should not include node_modules or dist files
       expect(completions.every((c: string) => !c.startsWith('node_modules/'))).toBe(true)
       expect(completions.every((c: string) => !c.startsWith('dist/'))).toBe(true)
+      
+      // Restore original cache
+      ;(server as any).fileCache = originalCache
+    })
+
+    it('should support path completion like terminal', () => {
+      // Test path completion: /cat src/c should match src/cli.* files
+      const completions = (server as any).getFileCompletionsSync('src/c')
+      
+      // Should find files starting with src/c
+      expect(completions.length).toBeGreaterThan(0)
+      expect(completions.every((c: string) => c.startsWith('src/c'))).toBe(true)
+    })
+
+    it('should find common prefix for path completion', () => {
+      // Mock some files with common prefix
+      const mockFiles: FileInfo[] = [
+        {
+          absolutePath: '/project/src/cli.ts',
+          relativePath: 'src/cli.ts',
+          name: 'cli.ts',
+          extension: '.ts',
+          directory: 'src',
+          size: 100,
+          lastModified: new Date(),
+        },
+        {
+          absolutePath: '/project/src/cli.test.ts',
+          relativePath: 'src/cli.test.ts',
+          name: 'cli.test.ts',
+          extension: '.ts',
+          directory: 'src',
+          size: 200,
+          lastModified: new Date(),
+        },
+      ]
+      
+      const originalCache = (server as any).fileCache
+      ;(server as any).fileCache = [...originalCache, ...mockFiles]
+      
+      // Test common prefix finding
+      const completions = (server as any).getFileCompletionsSync('src/cli')
+      const commonPrefix = (server as any).findCommonPrefix(completions)
+      
+      // Should find common prefix between src/cli.ts and src/cli.test.ts
+      expect(commonPrefix).toBe('src/cli.t')
       
       // Restore original cache
       ;(server as any).fileCache = originalCache

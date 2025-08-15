@@ -639,20 +639,29 @@ export class ClaudeTermIDEServer {
           .sort()
       }
 
-      // For prefix matching: match against filename only (not full path)
+      // For prefix matching: match against full relative path OR filename
+      const lowerPathPrefix = pathPrefix.toLowerCase()
       const matchingFiles = visibleFiles.filter((file) => {
-        return file.name.toLowerCase().startsWith(pathPrefix.toLowerCase())
+        // Match against full path (for path completion like "src/cli")
+        if (file.relativePath.toLowerCase().startsWith(lowerPathPrefix)) {
+          return true
+        }
+        // Also match against filename only (for simple completion like "user")
+        if (!lowerPathPrefix.includes('/') && file.name.toLowerCase().startsWith(lowerPathPrefix)) {
+          return true
+        }
+        return false
       })
 
-      // Sort by filename length (shorter matches first), then alphabetically
+      // Sort by path length (shorter matches first), then alphabetically
       const sortedFiles = matchingFiles
         .sort((a, b) => {
-          const aNameLen = a.name.length
-          const bNameLen = b.name.length
-          if (aNameLen !== bNameLen) {
-            return aNameLen - bNameLen
+          const aPathLen = a.relativePath.length
+          const bPathLen = b.relativePath.length
+          if (aPathLen !== bPathLen) {
+            return aPathLen - bPathLen
           }
-          return a.name.localeCompare(b.name)
+          return a.relativePath.localeCompare(b.relativePath)
         })
         .slice(0, 15)
 
