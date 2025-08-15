@@ -37,7 +37,7 @@ describe('GitReviewManager', () => {
   })
 
   describe('formatDiffWithDelta', () => {
-    it('should format diff content using delta', async () => {
+    it('should format diff content using delta with enhanced options', async () => {
       const mockDiffContent = `diff --git a/test.txt b/test.txt
 index 123..456 100644
 --- a/test.txt
@@ -50,12 +50,37 @@ index 123..456 100644
 
       expect(typeof formattedDiff).toBe('string')
       expect(formattedDiff.length).toBeGreaterThan(0)
+      // Verify Delta formatting features are applied
+      expect(formattedDiff).toContain('test.txt')
     })
 
     it('should handle empty diff content', async () => {
       const formattedDiff = await gitReview.formatDiffWithDelta('')
 
       expect(formattedDiff).toBe('')
+    })
+
+    it('should fallback to plain diff when Delta fails', async () => {
+      const mockDiffContent = `diff --git a/test.txt b/test.txt
+@@ -1 +1 @@
+-old content
++new content`
+
+      // Mock execSync to simulate Delta failure
+      const execSyncSpy = jest.spyOn(require('child_process'), 'execSync')
+      execSyncSpy.mockImplementation(() => {
+        throw new Error('Delta not found')
+      })
+
+      const consoleSpy = jest.spyOn(console, 'warn').mockImplementation()
+
+      const formattedDiff = await gitReview.formatDiffWithDelta(mockDiffContent)
+
+      expect(formattedDiff).toBe(mockDiffContent)
+      expect(consoleSpy).toHaveBeenCalledWith('⚠️  Delta not available, using plain diff format')
+
+      execSyncSpy.mockRestore()
+      consoleSpy.mockRestore()
     })
   })
 

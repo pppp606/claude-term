@@ -52,14 +52,15 @@ export class GitReviewManager {
       }
 
       try {
-        // Use delta to format diff if available
-        const deltaOutput = execSync('echo "$DIFF" | delta --no-gitconfig', {
+        // Use delta to format diff if available with enhanced configuration
+        const deltaOutput = execSync('echo "$DIFF" | delta --no-gitconfig --line-numbers --side-by-side', {
           encoding: 'utf8',
           env: { ...process.env, DIFF: diffContent },
         })
         return deltaOutput
       } catch (error) {
         // Fallback to original diff if delta is not available
+        console.warn('⚠️  Delta not available, using plain diff format')
         return diffContent
       }
     })
