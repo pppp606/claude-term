@@ -619,13 +619,9 @@ export class ClaudeTermIDEServer {
     const trimmed = command.trim()
     const workspaceFolder = this.options.workspaceFolder || process.cwd()
     
-    // Handle approval choice input
-    if (this.waitingForApproval) {
-      await this.handleApprovalChoice(trimmed.toLowerCase())
-      return
-    }
+    // Note: approval handling is now done via questionInterface in handleReviewPushCommand
     
-    // Clear waiting for approval if user runs other commands  
+    // Check if command is being entered while we expected approval (edge case)
     if (this.waitingForApproval && !['y', 'n', 'yes', 'no'].includes(trimmed.toLowerCase())) {
       this.waitingForApproval = false
       console.log('📋 Approval cancelled.')
@@ -695,27 +691,27 @@ export class ClaudeTermIDEServer {
       // Get current branch for prompt
       const currentBranch = execSync('git branch --show-current', { encoding: 'utf8' }).trim()
       
-      console.log(`\n❓ push to origin/${currentBranch}? (y/n):`)
-      
-      // Set waiting state
+      // Use a simple question approach without recreating full readline
       this.waitingForApproval = true
       
-      // Completely reset stdin state and recreate readline with proper timing
-      if (wasReadlineActive) {
-        // Clear stdin completely
-        if (process.stdin.readable) {
-          process.stdin.pause()
-          // Drain any pending data
-          process.stdin.read()
-          process.stdin.resume()
-          process.stdin.pause()
-        }
+      // Create a temporary readline just for the question
+      const questionInterface = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      })
+      
+      questionInterface.question(`\n❓ push to origin/${currentBranch}? (y/n): `, async (answer) => {
+        questionInterface.close()
         
-        // Longer delay to ensure stdin state is completely clean
-        setTimeout(() => {
+        // Process the answer
+        await this.handleApprovalChoice(answer.trim())
+        
+        // Recreate the main readline interface after processing
+        if (wasReadlineActive) {
           this.createReadlineInterface()
-        }, 300)
-      }
+        }
+      })
+      
     } catch (error) {
       console.error('❌ Failed to review commit:', error instanceof Error ? error.message : error)
       this.waitingForApproval = false
@@ -728,18 +724,13 @@ export class ClaudeTermIDEServer {
   }
 
   private createReadlineInterface(): void {
-    // Completely clear stdin before creating new readline
+    // Clear any pending input before creating new readline
     if (process.stdin.readable) {
       process.stdin.pause()
-      // Drain all pending input
-      while (process.stdin.read() !== null) {
-        // Discard all pending input
-      }
       process.stdin.resume()
-      process.stdin.pause()
     }
     
-    // Shorter delay since we've already done thorough cleanup
+    // Small delay to ensure terminal state is clean
     setTimeout(() => {
       this.rl = readline.createInterface({
         input: process.stdin,
@@ -843,13 +834,6 @@ export class ClaudeTermIDEServer {
     } catch (error) {
       console.error('❌ Approval process failed:', error instanceof Error ? error.message : error)
     }
-    
-    // Restore normal prompt after approval process
-    setTimeout(() => {
-      if (this.rl) {
-        this.rl.prompt()
-      }
-    }, 100)
   }
 
   private async browseFiles(workspaceFolder: string): Promise<void> {
