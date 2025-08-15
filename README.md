@@ -120,15 +120,22 @@ The standout feature of `claude-term` is **interactive line selection** with fzf
 2. 📄 **Less Pager** - Opens scrollable diff view with Delta syntax highlighting  
 3. 📋 **Commit List** - Shows all commits to be pushed with hash and message
 4. 📁 **File-by-File Diffs** - Beautiful, color-coded diffs for each changed file
-5. ✅ **User Approval** - Simple y/n choice after review
+5. ✅ **Single Approval** - Simple y/n choice after review (no duplicate prompts)
 6. 🚀 **Safe Push** - Pushes to remote if approved
 7. 🔄 **Smart Reject** - If rejected, undoes all commits while preserving changes
+8. 🧹 **Clean Display** - No temp file paths shown in less status line
 
 **Perfect for:**
 - Reviewing code before pushing to shared branches
 - Ensuring no debug code or secrets are committed
 - Double-checking complex changes
 - Safe collaboration workflows
+- Clean editing sessions without scattered diff outputs
+
+**Enhanced Workflow:**
+- Claude Code edits files → Simple "📝 File modified" notifications
+- Use `/review-push` when ready → Comprehensive diff review with less pager
+- Single y/n approval → Clean push or smart rollback
 
 ### Interactive Line Selection (continued)
 
@@ -177,16 +184,17 @@ The standout feature of `claude-term` is **interactive line selection** with fzf
 
 ### Git Review & Push Workflow ✅
 - **Unpushed Commit Detection**: Automatically finds commits ahead of origin
-- **Less Pager Integration**: Scrollable diff review with full terminal control
-- **Delta Syntax Highlighting**: Beautiful, color-coded diff display
-- **Safe Push Workflow**: User approval required before pushing
+- **Less Pager Integration**: Scrollable diff review with clean display (no temp file paths)
+- **Delta Syntax Highlighting**: Beautiful, color-coded diff display via stdin
+- **Single Approval Flow**: No duplicate confirmation prompts 
 - **Smart Reject**: Undo commits while preserving working directory changes
 - **Multi-commit Support**: Handles single or multiple unpushed commits
+- **Readline Stability**: Robust input handling without buffering issues
 
-### Diff & Display ✅
-- **Delta Integration**: Beautiful diff rendering
-- **File Change Detection**: Automatic diff display for modifications
-- **Multiple Fallbacks**: Graceful degradation (delta → diff → cat)
+### Clean Edit Experience ✅
+- **Streamlined File Editing**: Simple file modification notifications
+- **Consolidated Diff Review**: All changes reviewed together via `/review-push`
+- **No Scattered Diffs**: Clean editing experience without interrupting individual file diffs
 
 ## Command Line Options
 
