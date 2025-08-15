@@ -37,7 +37,7 @@ export class GitApprovalManager {
 
   processApprovalAction(
     approval: boolean | 'modify',
-    _commitMessage: string
+    _commitMessage: string,
   ): Promise<ApprovalResult> {
     return Promise.resolve().then(() => {
       if (approval === true) {

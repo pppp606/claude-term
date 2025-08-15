@@ -23,7 +23,7 @@ describe('GitApprovalManager', () => {
       expect(result).toBe(true)
       expect(mockReadline.question).toHaveBeenCalledWith(
         expect.stringContaining('Approve commit'),
-        expect.any(Function)
+        expect.any(Function),
       )
       expect(mockReadline.close).toHaveBeenCalled()
     })
@@ -91,7 +91,9 @@ describe('GitApprovalManager', () => {
   describe('interactiveApprovalFlow', () => {
     it('should execute complete approval flow', async () => {
       const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
-      const mockPromptForApproval = jest.spyOn(gitApproval, 'promptForApproval').mockResolvedValue(true)
+      const mockPromptForApproval = jest
+        .spyOn(gitApproval, 'promptForApproval')
+        .mockResolvedValue(true)
 
       const result = await gitApproval.interactiveApprovalFlow()
 
@@ -112,16 +114,18 @@ describe('GitApprovalManager', () => {
 
       expect(execSyncSpy).toHaveBeenCalledWith(
         'git commit --amend -m "new commit message"',
-        expect.any(Object)
+        expect.any(Object),
       )
 
       execSyncSpy.mockRestore()
     })
 
     it('should handle amend commit errors', async () => {
-      const execSyncSpy = jest.spyOn(require('child_process'), 'execSync').mockImplementation(() => {
-        throw new Error('Git error')
-      })
+      const execSyncSpy = jest
+        .spyOn(require('child_process'), 'execSync')
+        .mockImplementation(() => {
+          throw new Error('Git error')
+        })
 
       await expect(gitApproval.amendCommit('new message')).rejects.toThrow('Failed to amend commit')
 
@@ -141,9 +145,11 @@ describe('GitApprovalManager', () => {
     })
 
     it('should handle rollback errors', async () => {
-      const execSyncSpy = jest.spyOn(require('child_process'), 'execSync').mockImplementation(() => {
-        throw new Error('Git error')
-      })
+      const execSyncSpy = jest
+        .spyOn(require('child_process'), 'execSync')
+        .mockImplementation(() => {
+          throw new Error('Git error')
+        })
 
       await expect(gitApproval.rollbackCommit()).rejects.toThrow('Failed to rollback commit')
 
