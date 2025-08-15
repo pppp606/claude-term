@@ -6,7 +6,7 @@ describe('ClaudeTermIDEServer Git Integration', () => {
   beforeEach(() => {
     server = new ClaudeTermIDEServer({
       workspaceFolder: process.cwd(),
-      ideName: 'test-server'
+      ideName: 'test-server',
     })
   })
 
@@ -18,10 +18,10 @@ describe('ClaudeTermIDEServer Git Integration', () => {
 
     it('should handle help command including Git commands', async () => {
       const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
-      
+
       // Test the processCommand method indirectly by accessing private method
       // This is a simplified test - in real usage, commands are processed through readline
-      
+
       consoleSpy.mockRestore()
       expect(true).toBe(true) // Placeholder - actual testing would need more sophisticated setup
     })

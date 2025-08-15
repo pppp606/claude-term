@@ -96,14 +96,14 @@ export class GitReviewManager {
         const range = commitRange || 'HEAD'
         const cmd = `git show --name-only --format="" ${range}`
         const output = execSync(cmd, { encoding: 'utf8' }).trim()
-        return output ? output.split('\n').filter(line => line.trim()) : []
+        return output ? output.split('\n').filter((line) => line.trim()) : []
       } catch (error) {
         throw new Error('Failed to get changed files')
       }
     })
   }
 
-  getFileDiffs(commitRange?: string): Promise<Array<{file: string, diff: string}>> {
+  getFileDiffs(commitRange?: string): Promise<Array<{ file: string; diff: string }>> {
     return Promise.resolve().then(() => {
       try {
         const range = commitRange || 'HEAD'
@@ -116,9 +116,11 @@ export class GitReviewManager {
           changedFilesCommand = `git show --name-only --format="" ${range}`
         }
         const changedFiles = execSync(changedFilesCommand, { encoding: 'utf8' })
-          .trim().split('\n').filter(line => line.trim())
-        
-        const fileDiffs = changedFiles.map(file => {
+          .trim()
+          .split('\n')
+          .filter((line) => line.trim())
+
+        const fileDiffs = changedFiles.map((file) => {
           try {
             // Get diff content for the range
             let diffCommand: string
@@ -135,7 +137,7 @@ export class GitReviewManager {
             return { file, diff: '' }
           }
         })
-        
+
         return fileDiffs
       } catch (error) {
         throw new Error('Failed to get file diffs')
@@ -148,7 +150,7 @@ export class GitReviewManager {
       try {
         // Get current branch
         const currentBranch = execSync('git branch --show-current', { encoding: 'utf8' }).trim()
-        
+
         // Check if remote tracking branch exists
         try {
           execSync(`git rev-parse --verify origin/${currentBranch}`, { encoding: 'utf8' })
@@ -157,9 +159,11 @@ export class GitReviewManager {
           const totalCommits = execSync('git rev-list --count HEAD', { encoding: 'utf8' }).trim()
           return parseInt(totalCommits) || 0
         }
-        
+
         // Count commits ahead of origin
-        const aheadCount = execSync(`git rev-list --count origin/${currentBranch}..HEAD`, { encoding: 'utf8' }).trim()
+        const aheadCount = execSync(`git rev-list --count origin/${currentBranch}..HEAD`, {
+          encoding: 'utf8',
+        }).trim()
         return parseInt(aheadCount) || 0
       } catch (error) {
         throw new Error('Failed to get unpushed commit count')
@@ -169,15 +173,15 @@ export class GitReviewManager {
 
   async generateCommitReviewContent(): Promise<string> {
     const unpushedCount = await this.getUnpushedCommitCount()
-    
+
     if (unpushedCount === 0) {
       return '✅ No unpushed commits to review.'
     }
-    
+
     // Get range for all unpushed commits
     const currentBranch = execSync('git branch --show-current', { encoding: 'utf8' }).trim()
     let commitRange: string
-    
+
     try {
       // Try to use origin tracking branch
       execSync(`git rev-parse --verify origin/${currentBranch}`, { encoding: 'utf8' })
@@ -186,25 +190,25 @@ export class GitReviewManager {
       // No remote tracking, show all commits
       commitRange = 'HEAD'
     }
-    
+
     const fileDiffs = await this.getFileDiffs(commitRange)
-    
+
     let content = ''
     content += `🔍 Reviewing latest commit for push...\n`
     content += `${'═'.repeat(50)}\n\n`
     content += `📝 Commit Review (${unpushedCount} unpushed commit${unpushedCount > 1 ? 's' : ''})\n\n`
-    
+
     // Show commit list
     const commitList = execSync(`git log --oneline ${commitRange}`, { encoding: 'utf8' }).trim()
     if (commitList) {
       content += `📋 Commits to push:\n`
-      commitList.split('\n').forEach(commit => {
+      commitList.split('\n').forEach((commit) => {
         content += `  ${commit}\n`
       })
     }
-    
+
     content += `\n📊 Changes:\n\n`
-    
+
     for (const fileDiff of fileDiffs) {
       content += `📁 ${fileDiff.file}\n`
       content += `${'─'.repeat(50)}\n`
@@ -214,28 +218,28 @@ export class GitReviewManager {
       }
       content += `${'─'.repeat(50)}\n\n`
     }
-    
+
     return content
   }
 
   async displayCommitReview(): Promise<void> {
     try {
       const content = await this.generateCommitReviewContent()
-      
+
       // Try to use less with proper terminal handling
       try {
         const { spawn } = await import('child_process')
-        
+
         // Create less process with stdin instead of file to avoid showing path
         const less = spawn('less', ['-R', '-X'], {
           stdio: ['pipe', 'inherit', 'inherit'],
-          detached: false
+          detached: false,
         })
-        
+
         // Write content to less stdin
         less.stdin.write(content)
         less.stdin.end()
-        
+
         // Return a promise that resolves when less exits
         return new Promise((resolve, reject) => {
           less.on('close', (code) => {
@@ -245,12 +249,11 @@ export class GitReviewManager {
               reject(new Error(`less exited with code ${code}`))
             }
           })
-          
+
           less.on('error', (error) => {
             reject(error)
           })
         })
-        
       } catch (error) {
         // Fallback to console output
         console.log('\n' + '═'.repeat(80))
