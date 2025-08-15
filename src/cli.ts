@@ -29,11 +29,10 @@ program
   })
 
 // Make start the default command when no subcommand is provided
-program.action(async () => {
+program.action(() => {
   // Default behavior - show help
   program.help()
 })
-
 
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url)
 if (isMainModule) {

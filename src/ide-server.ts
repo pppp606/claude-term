@@ -7,6 +7,8 @@ import os from 'os'
 import { randomUUID } from 'crypto'
 import { execSync } from 'child_process'
 import * as readline from 'readline'
+import { GitReviewManager } from './git-review.js'
+import { GitPushManager } from './git-push.js'
 
 export interface IDEServerOptions {
   port?: number
@@ -21,9 +23,14 @@ export class ClaudeTermIDEServer {
   private authToken: string = ''
   private connectedWS: WebSocket | null = null
   private rl: readline.Interface | null = null
+  private gitReview: GitReviewManager
+  private gitPush: GitPushManager
+  private waitingForApproval: boolean = false
 
   constructor(private options: IDEServerOptions = {}) {
     this.authToken = randomUUID()
+    this.gitReview = new GitReviewManager()
+    this.gitPush = new GitPushManager()
   }
 
   async start(): Promise<number> {
@@ -102,7 +109,7 @@ export class ClaudeTermIDEServer {
     // Start interactive session
     this.startInteractiveSession()
 
-    ws.on('message', (data: Buffer) => {
+    ws.on('message', async (data: Buffer) => {
       try {
         const message = JSON.parse(data.toString())
 
@@ -122,7 +129,7 @@ export class ClaudeTermIDEServer {
         } else if (message.method === 'tools/list') {
           this.handleToolsList(ws, message)
         } else if (message.method?.startsWith('tools/')) {
-          this.handleToolCall(ws, message)
+          await this.handleToolCall(ws, message)
         } else if (message.method?.startsWith('resources/')) {
           this.handleResourceCall(ws, message)
         } else {
@@ -147,7 +154,6 @@ export class ClaudeTermIDEServer {
       console.error('🔥 WebSocket error:', error)
     })
   }
-
 
   private handleInitialize(ws: WebSocket, message: any): void {
     const response = {
@@ -279,6 +285,15 @@ export class ClaudeTermIDEServer {
               properties: {},
             },
           },
+          {
+            name: 'reviewPush',
+            description: 'Review unpushed commits and initiate push workflow with user approval',
+            inputSchema: {
+              type: 'object',
+              properties: {},
+              required: [],
+            },
+          },
         ],
       },
     }
@@ -287,7 +302,22 @@ export class ClaudeTermIDEServer {
     console.log('📋 Sent tools list to Claude Code')
   }
 
-  private handleToolCall(ws: WebSocket, message: any): void {
+  private async handleReviewPushTool(_params: any): Promise<string> {
+    try {
+      console.log('\n🔍 Claude Code requested commit review...')
+      
+      // Execute the review-push workflow
+      await this.handleReviewPushCommand()
+      
+      return 'Review-push workflow initiated. User will see commit review in less pager and can approve/reject with y/n.'
+    } catch (error) {
+      const errorMsg = `Failed to initiate review-push: ${error instanceof Error ? error.message : error}`
+      console.error('❌', errorMsg)
+      return errorMsg
+    }
+  }
+
+  private async handleToolCall(ws: WebSocket, message: any): Promise<void> {
     const method = message.method
     const params = message.params || {}
 
@@ -297,6 +327,9 @@ export class ClaudeTermIDEServer {
       if (method === 'tools/call' && params.name === 'openDiff') {
         // Handle Claude Code's openDiff tool call
         result = this.handleOpenDiff(params.arguments)
+      } else if (method === 'tools/call' && params.name === 'reviewPush') {
+        // Handle Claude Code's reviewPush tool call
+        result = await this.handleReviewPushTool(params.arguments)
       } else if (method.startsWith('tools/')) {
         const toolName = method.replace('tools/', '')
         switch (toolName) {
@@ -432,15 +465,9 @@ export class ClaudeTermIDEServer {
 
     const fullPath = path.resolve(this.options.workspaceFolder || process.cwd(), filePath)
 
-    // Show diff if file exists
-    if (fs.existsSync(fullPath)) {
-      try {
-        const originalContent = fs.readFileSync(fullPath, 'utf8')
-        this.displayDiff(filePath, originalContent, newContent)
-      } catch (error) {
-        console.error('Error reading original file for diff:', error)
-      }
-    } else {
+    // Simply write the file without showing diff
+    // Diff review is now handled by /review-push command
+    if (!fs.existsSync(fullPath)) {
       console.log(`\n📝 Creating new file: ${filePath}`)
     }
 
@@ -448,65 +475,14 @@ export class ClaudeTermIDEServer {
     return `File written successfully: ${filePath}`
   }
 
-  private displayDiff(filePath: string, originalContent: string, newContent: string): void {
-    console.log(`\n📝 Changes to: ${filePath}`)
-
-    try {
-      // Create temporary files for diff with proper extensions for syntax highlighting
-      const tmpDir = os.tmpdir()
-      const fileExt = path.extname(filePath) || '.txt'
-      const originalFile = path.join(tmpDir, `claude-term-original-${randomUUID()}${fileExt}`)
-      const modifiedFile = path.join(tmpDir, `claude-term-modified-${randomUUID()}${fileExt}`)
-
-      fs.writeFileSync(originalFile, originalContent)
-      fs.writeFileSync(modifiedFile, newContent)
-
-      // Check if delta is available
-      let hasDelta = false
-      try {
-        execSync('command -v delta', { stdio: 'ignore' })
-        hasDelta = true
-      } catch {}
-
-      if (hasDelta) {
-        // Use delta (ignore exit code as it returns 1 for differences)
-        try {
-          execSync(
-            `delta --pager=never --syntax-theme=Dracula --no-gitconfig --file-style=omit --hunk-header-style=omit --keep-plus-minus-markers "${originalFile}" "${modifiedFile}"`,
-            {
-              stdio: 'inherit',
-            },
-          )
-        } catch {
-          // Delta executed but returned non-zero exit code (normal for diffs)
-        }
-      } else {
-        // Fall back to system diff
-        try {
-          execSync(`diff -u "${originalFile}" "${modifiedFile}"`, {
-            stdio: 'inherit',
-          })
-        } catch {
-          // diff also returns non-zero for differences, which is normal
-        }
-      }
-
-      // Clean up temp files
-      fs.unlinkSync(originalFile)
-      fs.unlinkSync(modifiedFile)
-    } catch (error) {
-      console.error('Error creating diff:', error)
-    }
-
-    console.log('')
-  }
+  // Removed displayDiff method - diff review is now handled by /review-push command
 
   private startInteractiveSession(): void {
     console.log('\n🔄 Interactive IDE server session started')
     console.log('Type /help for available commands')
     console.log('Waiting for Claude Code requests...\n')
 
-    // Create readline interface with tab completion
+    // Create readline interface with tab completion (without delay for startup)
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
@@ -534,15 +510,7 @@ export class ClaudeTermIDEServer {
   }
 
   private completeCommand(line: string): [string[], string] {
-    const commands = [
-      '/help',
-      '/send ',
-      '/browse',
-      '/cat ',
-      '/search ',
-      '/active',
-      '/quit',
-    ]
+    const commands = ['/help', '/send ', '/browse', '/cat ', '/search ', '/active', '/quit', '/review-push', '/rp']
 
     const hits = commands.filter((cmd) => cmd.startsWith(line))
 
@@ -593,6 +561,14 @@ export class ClaudeTermIDEServer {
   private async processCommand(command: string): Promise<void> {
     const trimmed = command.trim()
     const workspaceFolder = this.options.workspaceFolder || process.cwd()
+    
+    // Note: approval handling is now done via questionInterface in handleReviewPushCommand
+    
+    // Check if command is being entered while we expected approval (edge case)
+    if (this.waitingForApproval && !['y', 'n', 'yes', 'no'].includes(trimmed.toLowerCase())) {
+      this.waitingForApproval = false
+      console.log('📋 Approval cancelled.')
+    }
 
     if (trimmed === '/help') {
       console.log('Available commands:')
@@ -601,6 +577,7 @@ export class ClaudeTermIDEServer {
       console.log('  /cat <path> - Display file interactively, select text to send to Claude')
       console.log('  /search <pattern> - Search code with ripgrep')
       console.log('  /active - Show active files (resources)')
+      console.log('  /review-push (/rp) - Review unpushed commits and approve/reject for push')
       console.log('  /help - Show this help message')
       console.log('  /quit - Stop the server and exit')
     } else if (trimmed === '/quit') {
@@ -635,9 +612,170 @@ export class ClaudeTermIDEServer {
       } else {
         console.log('Usage: /send <path>')
       }
+    } else if (trimmed === '/review-push' || trimmed === '/rp') {
+      await this.handleReviewPushCommand()
     } else if (trimmed.startsWith('/')) {
       console.log(`Unknown command: ${trimmed}`)
       console.log('Type /help for available commands')
+    }
+  }
+
+  private async handleReviewPushCommand(): Promise<void> {
+    try {
+      // Completely close readline during less operation
+      const wasReadlineActive = !!this.rl
+      if (this.rl) {
+        this.rl.close()
+        this.rl = null
+      }
+      
+      await this.gitReview.displayCommitReview()
+      
+      // Get current branch for prompt
+      const currentBranch = execSync('git branch --show-current', { encoding: 'utf8' }).trim()
+      
+      // Use a simple question approach without recreating full readline
+      this.waitingForApproval = true
+      
+      // Create a temporary readline just for the question
+      const questionInterface = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      })
+      
+      questionInterface.question(`\n❓ push to origin/${currentBranch}? (y/n): `, async (answer) => {
+        questionInterface.close()
+        
+        // Process the answer
+        await this.handleApprovalChoice(answer.trim())
+        
+        // Recreate the main readline interface after processing
+        if (wasReadlineActive) {
+          this.createReadlineInterface()
+        }
+      })
+      
+    } catch (error) {
+      console.error('❌ Failed to review commit:', error instanceof Error ? error.message : error)
+      this.waitingForApproval = false
+      
+      // Make sure to recreate readline on error
+      if (!this.rl) {
+        this.createReadlineInterface()
+      }
+    }
+  }
+
+  private createReadlineInterface(): void {
+    // Clear any pending input before creating new readline
+    if (process.stdin.readable) {
+      process.stdin.pause()
+      process.stdin.resume()
+    }
+    
+    // Small delay to ensure terminal state is clean
+    setTimeout(() => {
+      this.rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        completer: this.completeCommand.bind(this),
+        prompt: '> ',
+      })
+
+      this.rl.on('line', async (input) => {
+        const trimmed = input.trim()
+
+        if (trimmed) {
+          await this.processCommand(trimmed)
+        }
+
+        if (this.rl && !this.waitingForApproval) {
+          this.rl.prompt()
+        }
+      })
+
+      this.rl.on('SIGINT', () => {
+        this.stop()
+        process.exit(0)
+      })
+
+      // Only show prompt if not waiting for approval
+      if (!this.waitingForApproval) {
+        this.rl.prompt()
+      }
+    }, 100)
+  }
+
+  private async handleApprovalChoice(choice: string): Promise<void> {
+    this.waitingForApproval = false
+
+    try {
+      
+      if (choice === 'y' || choice === 'yes') {
+        console.log('\n🚀 Initiating push workflow...')
+        
+        // Get current branch name
+        const currentBranch = execSync('git branch --show-current', {
+          encoding: 'utf8'
+        }).trim()
+        
+        const pushResult = await this.gitPush.autoPushFlow(currentBranch, true)
+        
+        if (pushResult.success && pushResult.pushed) {
+          console.log(`\n🎉 ${pushResult.message}`)
+        } else if (pushResult.success && !pushResult.pushed) {
+          console.log(`\n📋 ${pushResult.message}`)
+        } else {
+          console.error(`\n❌ ${pushResult.message}`)
+        }
+      } else if (choice === 'n' || choice === 'no') {
+        console.log('\n🔄 Rejecting commit and undoing...')
+        
+        try {
+          // Get unpushed commit count to reset
+          const unpushedCount = await this.gitReview.getUnpushedCommitCount()
+          
+          if (unpushedCount === 0) {
+            console.log('⚠️  No unpushed commits to undo.')
+            return
+          }
+          
+          // Show current commit hash before reset
+          const currentCommit = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim()
+          console.log(`📍 Current commit: ${currentCommit.substring(0, 8)}`)
+          console.log(`🔄 Undoing ${unpushedCount} unpushed commit${unpushedCount > 1 ? 's' : ''}...`)
+          
+          // Reset to before unpushed commits but keep changes in working directory
+          const resetCommand = `git reset --soft HEAD~${unpushedCount}`
+          console.log(`🔧 Executing: ${resetCommand}`)
+          const resetResult = execSync(resetCommand, {
+            encoding: 'utf8'
+          })
+          console.log(`✅ Reset soft result: ${resetResult || 'Success (no output)'}`)
+          
+          // Unstage all changes
+          console.log('🔧 Executing: git reset')
+          const unstageResult = execSync('git reset', {
+            encoding: 'utf8'
+          })
+          console.log(`✅ Unstage result: ${unstageResult || 'Success (no output)'}`)
+          
+          // Show final status
+          const finalCommit = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim()
+          console.log(`📍 Final commit: ${finalCommit.substring(0, 8)}`)
+          
+          console.log(`✅ ${unpushedCount} commit${unpushedCount > 1 ? 's' : ''} undone successfully`)
+          console.log('📝 Changes remain in working directory (unstaged)')
+        } catch (error) {
+          console.error('❌ Failed to undo commit:', error instanceof Error ? error.message : error)
+        }
+      } else {
+        console.log('❌ Invalid choice. Please enter y or n.')
+        console.log('📋 Approval cancelled. Use "/rp" again to retry.')
+      }
+      
+    } catch (error) {
+      console.error('❌ Approval process failed:', error instanceof Error ? error.message : error)
     }
   }
 
@@ -696,7 +834,6 @@ export class ClaudeTermIDEServer {
       }
     })
   }
-
 
   private searchCode(pattern: string, workspaceFolder: string): void {
     try {
@@ -759,7 +896,6 @@ export class ClaudeTermIDEServer {
     console.log(`\nTotal: ${this.activeFiles.size} file(s)`)
     console.log('Claude Code can access these files via resources API\n')
   }
-
 
   private sendFileToClient(filePath: string): void {
     try {
@@ -824,21 +960,16 @@ export class ClaudeTermIDEServer {
 
   private handleOpenDiff(args: any): string {
     try {
-      const { old_file_path, new_file_path, new_file_contents } = args
+      const { new_file_path } = args
 
-      // Read the current file content
-      let originalContent = ''
-      if (fs.existsSync(old_file_path)) {
-        originalContent = fs.readFileSync(old_file_path, 'utf8')
-      }
+      // No longer display individual diffs - use /review-push for comprehensive diff review
+      console.log(`📝 File modified: ${new_file_path}`)
+      console.log('💡 Use /review-push (/rp) to review all changes before pushing')
 
-      // Display the diff
-      this.displayDiff(new_file_path, originalContent, new_file_contents)
-
-      return `Diff displayed for ${new_file_path}`
+      return `File modification noted for ${new_file_path}`
     } catch (error) {
       console.error('Error handling openDiff:', error)
-      return `Error displaying diff: ${error instanceof Error ? error.message : 'Unknown error'}`
+      return `Error handling file modification: ${error instanceof Error ? error.message : 'Unknown error'}`
     }
   }
 
@@ -868,7 +999,7 @@ export class ClaudeTermIDEServer {
       }
 
       const content = fs.readFileSync(filePath, 'utf8')
-      
+
       console.log(`\n📄 Interactive File Selector: ${path.basename(filePath)}`)
       console.log('📝 Instructions:')
       console.log('  • Use ↑↓ arrows or j/k to navigate')
@@ -877,7 +1008,6 @@ export class ClaudeTermIDEServer {
       console.log('  • Press Esc to cancel\n')
 
       await this.selectLinesWithFzf(filePath, content)
-
     } catch (error) {
       console.error('Error in interactive file display:', error)
     }
@@ -886,16 +1016,16 @@ export class ClaudeTermIDEServer {
   private async selectLinesWithFzf(filePath: string, content: string): Promise<void> {
     try {
       const lines = content.split('\n')
-      
+
       // Create temporary file with numbered lines for fzf
       const tmpDir = os.tmpdir()
       const tmpFile = path.join(tmpDir, `claude-term-lines-${randomUUID()}.txt`)
-      
+
       // Format lines with line numbers
-      const numberedLines = lines.map((line, index) => 
-        `${(index + 1).toString().padStart(4, ' ')}: ${line}`
-      ).join('\n')
-      
+      const numberedLines = lines
+        .map((line, index) => `${(index + 1).toString().padStart(4, ' ')}: ${line}`)
+        .join('\n')
+
       fs.writeFileSync(tmpFile, numberedLines)
 
       // Use fzf for line selection - simple and reliable
@@ -909,7 +1039,7 @@ export class ClaudeTermIDEServer {
 
       console.log('🔍 Opening fzf line selector...')
       console.log('💡 Select lines with Tab, press Enter to send to Claude')
-      
+
       const selectedLines = execSync(fzfCommand, {
         encoding: 'utf8',
         stdio: ['inherit', 'pipe', 'inherit'],
@@ -923,7 +1053,6 @@ export class ClaudeTermIDEServer {
       } else {
         console.log('❌ No lines selected')
       }
-
     } catch (error) {
       if (error instanceof Error && error.message.includes('Command failed')) {
         console.log('❌ Selection cancelled or fzf not available')
@@ -934,16 +1063,22 @@ export class ClaudeTermIDEServer {
     }
   }
 
-  private async processFzfSelection(filePath: string, content: string, selectedLines: string): Promise<void> {
+  private async processFzfSelection(
+    filePath: string,
+    content: string,
+    selectedLines: string,
+  ): Promise<void> {
     try {
       const lines = content.split('\n')
       const selections = selectedLines.split('\n')
-      
+
       // Extract line numbers from fzf output
-      const lineNumbers = selections.map(line => {
-        const match = line.match(/^\s*(\d+):/)
-        return match ? parseInt(match[1]) - 1 : -1 // Convert to 0-based
-      }).filter(num => num >= 0)
+      const lineNumbers = selections
+        .map((line) => {
+          const match = line.match(/^\s*(\d+):/)
+          return match ? parseInt(match[1]) - 1 : -1 // Convert to 0-based
+        })
+        .filter((num) => num >= 0)
 
       if (lineNumbers.length === 0) {
         console.log('❌ No valid lines selected')
@@ -954,7 +1089,7 @@ export class ClaudeTermIDEServer {
       lineNumbers.sort((a, b) => a - b)
 
       // Get selected text
-      const selectedText = lineNumbers.map(lineNum => lines[lineNum]).join('\n')
+      const selectedText = lineNumbers.map((lineNum) => lines[lineNum]).join('\n')
       const startLine = lineNumbers[0]
       const endLine = lineNumbers[lineNumbers.length - 1]
 
@@ -963,7 +1098,7 @@ export class ClaudeTermIDEServer {
         return
       }
 
-      // Send selection_changed event to Claude Code  
+      // Send selection_changed event to Claude Code
       const selectionMessage = {
         jsonrpc: '2.0',
         method: 'selection_changed',
@@ -971,22 +1106,23 @@ export class ClaudeTermIDEServer {
           filePath: filePath,
           selection: {
             start: { line: startLine, character: 0 },
-            end: { line: endLine, character: lines[endLine]?.length || 0 }
+            end: { line: endLine, character: lines[endLine]?.length || 0 },
           },
           text: content,
-          selectedText: selectedText
-        }
+          selectedText: selectedText,
+        },
       }
 
       console.log(`\n📤 Sending selection to Claude Code:`)
-      console.log(`📄 File: ${path.relative(this.options.workspaceFolder || process.cwd(), filePath)}`)
+      console.log(
+        `📄 File: ${path.relative(this.options.workspaceFolder || process.cwd(), filePath)}`,
+      )
       console.log(`📍 Lines: ${startLine + 1}-${endLine + 1}`)
       console.log(`📝 Selected text (${selectedText.length} chars):`)
       console.log(selectedText.substring(0, 200) + (selectedText.length > 200 ? '...' : ''))
 
       this.connectedWS.send(JSON.stringify(selectionMessage))
       console.log(`\n✅ Selection sent to Claude Code!`)
-
     } catch (error) {
       console.error('Error processing fzf selection:', error)
     }
