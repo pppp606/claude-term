@@ -10,11 +10,18 @@ import * as readline from 'readline'
 import { GitReviewManager } from './git-review.js'
 import { GitPushManager } from './git-push.js'
 import { FileDiscovery, FileInfo } from './file-discovery.js'
+import { debugLog, logMCPMessage, logWebSocketEvent } from './debug.js'
+import { Server } from '@modelcontextprotocol/sdk/server/index.js'
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+import { createServer, IncomingMessage, ServerResponse } from 'http'
 
 export interface IDEServerOptions {
   port?: number
   workspaceFolder?: string
   ideName?: string
+  debug?: boolean
+  noWait?: boolean
+  internalMcpPort?: number
 }
 
 export class ClaudeTermIDEServer {
@@ -31,6 +38,11 @@ export class ClaudeTermIDEServer {
   private fileCache: FileInfo[] = []
   private cacheTimestamp: number = 0
   private readonly CACHE_TTL = 30000 // 30 seconds
+  
+  // Internal MCP Server for communication with standalone MCP
+  private internalMcpServer: Server | null = null
+  private internalHttpServer: any = null
+  private internalMcpPort: number = 0
 
   constructor(private options: IDEServerOptions = {}) {
     this.authToken = randomUUID()
@@ -40,6 +52,9 @@ export class ClaudeTermIDEServer {
   }
 
   async start(): Promise<number> {
+    // Start internal MCP server first
+    await this.startInternalMcpServer()
+
     // Create WebSocket server
     this.server = new WebSocketServer({
       port: this.options.port || 0, // Use 0 for dynamic port assignment
@@ -58,6 +73,7 @@ export class ClaudeTermIDEServer {
         if (typeof address === 'object' && address) {
           this.port = address.port
           console.log(`IDE Server listening on port ${this.port}`)
+          console.log(`Internal MCP Server listening on port ${this.internalMcpPort}`)
 
           // Create lock file
           this.createLockFile()
@@ -115,6 +131,11 @@ export class ClaudeTermIDEServer {
     console.log('Claude Code connected!')
     this.connectedWS = ws
 
+    logWebSocketEvent('CLIENT_CONNECTED', {
+      authHeader: !!authHeader,
+      headerMatch: authHeader === this.authToken,
+    })
+
     // Start interactive session
     this.startInteractiveSession()
 
@@ -122,11 +143,9 @@ export class ClaudeTermIDEServer {
       try {
         const message = JSON.parse(data.toString())
 
-        // Log received messages (can be disabled in production)
-        if (process.env.CLAUDE_TERM_DEBUG) {
-          console.log('\n🔍 DEBUG: Received from Claude Code:')
-          console.log(JSON.stringify(message, null, 2))
-        }
+        // Log received messages using new debug system
+        logMCPMessage('RECV', message)
+        debugLog('MCP', `Processing method: ${message.method || 'response'}`, { id: message.id })
 
         // Handle different MCP message types
         if (message.method === 'initialize') {
@@ -157,10 +176,12 @@ export class ClaudeTermIDEServer {
 
     ws.on('close', () => {
       console.log('👋 Claude Code disconnected')
+      logWebSocketEvent('CLIENT_DISCONNECTED')
     })
 
     ws.on('error', (error) => {
       console.error('🔥 WebSocket error:', error)
+      logWebSocketEvent('CLIENT_ERROR', { error: error.message })
     })
   }
 
@@ -230,6 +251,7 @@ export class ClaudeTermIDEServer {
       },
     }
 
+    logMCPMessage('SEND', response)
     ws.send(JSON.stringify(response))
   }
 
@@ -274,7 +296,7 @@ export class ClaudeTermIDEServer {
             },
           },
           {
-            name: 'openDiff',
+            name: 'open_diff',
             description: 'Open diff view',
             inputSchema: {
               type: 'object',
@@ -287,7 +309,7 @@ export class ClaudeTermIDEServer {
             },
           },
           {
-            name: 'closeAllDiffTabs',
+            name: 'close_all_diff_tabs',
             description: 'Close all diff tabs',
             inputSchema: {
               type: 'object',
@@ -295,8 +317,8 @@ export class ClaudeTermIDEServer {
             },
           },
           {
-            name: 'reviewPush',
-            description: 'Review unpushed commits and initiate push workflow with user approval',
+            name: 'review_push',
+            description: 'Push commits to remote repository with review and approval',
             inputSchema: {
               type: 'object',
               properties: {},
@@ -307,6 +329,7 @@ export class ClaudeTermIDEServer {
       },
     }
 
+    logMCPMessage('SEND', response)
     ws.send(JSON.stringify(response))
     console.log('📋 Sent tools list to Claude Code')
   }
@@ -333,11 +356,11 @@ export class ClaudeTermIDEServer {
     try {
       let result: any
 
-      if (method === 'tools/call' && params.name === 'openDiff') {
-        // Handle Claude Code's openDiff tool call
+      if (method === 'tools/call' && params.name === 'open_diff') {
+        // Handle Claude Code's open_diff tool call
         result = this.handleOpenDiff(params.arguments)
-      } else if (method === 'tools/call' && params.name === 'reviewPush') {
-        // Handle Claude Code's reviewPush tool call
+      } else if (method === 'tools/call' && params.name === 'review_push') {
+        // Handle Claude Code's review_push tool call
         result = await this.handleReviewPushTool(params.arguments)
       } else if (method.startsWith('tools/')) {
         const toolName = method.replace('tools/', '')
@@ -364,6 +387,7 @@ export class ClaudeTermIDEServer {
         result: { content: [{ type: 'text', text: result }] },
       }
 
+      logMCPMessage('SEND', response)
       ws.send(JSON.stringify(response))
     } catch (error) {
       const errorResponse = {
@@ -375,6 +399,7 @@ export class ClaudeTermIDEServer {
         },
       }
 
+      logMCPMessage('SEND', errorResponse)
       ws.send(JSON.stringify(errorResponse))
     }
   }
@@ -402,6 +427,7 @@ export class ClaudeTermIDEServer {
         result: result,
       }
 
+      logMCPMessage('SEND', response)
       ws.send(JSON.stringify(response))
     } catch (error) {
       const errorResponse = {
@@ -413,6 +439,7 @@ export class ClaudeTermIDEServer {
         },
       }
 
+      logMCPMessage('SEND', errorResponse)
       ws.send(JSON.stringify(errorResponse))
     }
   }
@@ -536,13 +563,13 @@ export class ClaudeTermIDEServer {
       if (parts.length >= 2) {
         const pathPrefix = parts.slice(1).join(' ')
         const fileHits = this.getFileCompletionsSync(pathPrefix)
-        
+
         if (fileHits.length === 0) {
           return [[], line]
         }
-        
+
         const commandPrefix = parts[0] + ' '
-        
+
         // Find common prefix for auto-completion
         if (fileHits.length === 1) {
           // Single match: return complete command with file path
@@ -555,7 +582,7 @@ export class ClaudeTermIDEServer {
             return [[commandPrefix + commonPrefix], line]
           } else {
             // No useful common prefix, return all complete commands
-            return [fileHits.map(file => commandPrefix + file), line]
+            return [fileHits.map((file) => commandPrefix + file), line]
           }
         }
       }
@@ -571,16 +598,16 @@ export class ClaudeTermIDEServer {
 
     let prefix = ''
     const firstString = strings[0]
-    
+
     for (let i = 0; i < firstString.length; i++) {
       const char = firstString[i]
-      if (strings.every(str => str[i] === char)) {
+      if (strings.every((str) => str[i] === char)) {
         prefix += char
       } else {
         break
       }
     }
-    
+
     return prefix
   }
 
@@ -590,17 +617,17 @@ export class ClaudeTermIDEServer {
       // Fallback to basic directory listing for immediate response
       return this.getBasicFileCompletions(pathPrefix)
     }
-    
+
     try {
       // Filter files: exclude .git, hidden files, and common gitignore patterns
       const visibleFiles = this.fileCache.filter((file) => {
         const path = file.relativePath
-        
+
         // Exclude .git directory and hidden files (except .env.example pattern)
         if (path.startsWith('.git/') || (path.startsWith('.') && !path.match(/^\.env\.example$/))) {
           return false
         }
-        
+
         // Extra safety: exclude common patterns in case they slip through FileDiscovery
         const commonIgnorePatterns = [
           'node_modules/',
@@ -614,11 +641,11 @@ export class ClaudeTermIDEServer {
           '.serverless/',
           '.vscode-test/',
         ]
-        
-        if (commonIgnorePatterns.some(pattern => path.startsWith(pattern))) {
+
+        if (commonIgnorePatterns.some((pattern) => path.startsWith(pattern))) {
           return false
         }
-        
+
         return true
       })
 
@@ -628,7 +655,10 @@ export class ClaudeTermIDEServer {
           .slice(0, 10)
           .map((file) => {
             try {
-              if (fs.existsSync(file.absolutePath) && fs.statSync(file.absolutePath).isDirectory()) {
+              if (
+                fs.existsSync(file.absolutePath) &&
+                fs.statSync(file.absolutePath).isDirectory()
+              ) {
                 return file.relativePath + '/'
               }
             } catch {
@@ -721,12 +751,12 @@ export class ClaudeTermIDEServer {
 
   private async refreshFileCache(workspaceFolder: string): Promise<void> {
     const now = Date.now()
-    
+
     // Check if cache is still fresh
-    if (this.fileCache.length > 0 && (now - this.cacheTimestamp) < this.CACHE_TTL) {
+    if (this.fileCache.length > 0 && now - this.cacheTimestamp < this.CACHE_TTL) {
       return
     }
-    
+
     try {
       // Refresh file cache
       this.fileCache = await this.fileDiscovery.scanFiles(workspaceFolder)
@@ -1042,11 +1072,8 @@ export class ClaudeTermIDEServer {
           },
         }
 
-        if (process.env.CLAUDE_TERM_DEBUG) {
-          console.log('🔍 DEBUG: Sending at_mentioned event:')
-          console.log(JSON.stringify(atMentionedEvent, null, 2))
-        }
-
+        debugLog('MCP', 'Sending at_mentioned event', atMentionedEvent)
+        logMCPMessage('SEND', atMentionedEvent)
         this.connectedWS.send(JSON.stringify(atMentionedEvent))
 
         // Also notify that resources have changed
@@ -1055,11 +1082,10 @@ export class ClaudeTermIDEServer {
           method: 'notifications/resources/list_changed',
           params: {},
         }
+        logMCPMessage('SEND', notification)
         this.connectedWS.send(JSON.stringify(notification))
 
-        if (process.env.CLAUDE_TERM_DEBUG) {
-          console.log('✅ Both at_mentioned event and resource notification sent')
-        }
+        debugLog('MCP', 'Both at_mentioned event and resource notification sent')
       } else {
         console.log('❌ No WebSocket connection available')
       }
@@ -1097,6 +1123,261 @@ export class ClaudeTermIDEServer {
     }
   }
 
+  // Internal MCP Server methods
+  private async startInternalMcpServer(): Promise<void> {
+    // Create internal MCP server for communication with standalone MCP
+    this.internalMcpServer = new Server(
+      {
+        name: 'claude-term-internal',
+        version: '0.0.1',
+      },
+      {
+        capabilities: {
+          tools: {},
+        },
+      }
+    )
+
+    this.setupInternalMcpTools()
+
+    // Start HTTP server for MCP communication
+    this.internalHttpServer = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+      if (req.method === 'POST' && req.url === '/mcp') {
+        await this.handleInternalMcpRequest(req, res)
+      } else {
+        res.writeHead(404)
+        res.end('Not Found')
+      }
+    })
+
+    return new Promise((resolve) => {
+      this.internalHttpServer.listen(this.options.internalMcpPort || 0, () => {
+        const address = this.internalHttpServer.address()
+        if (typeof address === 'object' && address) {
+          this.internalMcpPort = address.port
+          resolve()
+        }
+      })
+    })
+  }
+
+  private setupInternalMcpTools(): void {
+    if (!this.internalMcpServer) return
+
+    // Handle tools list request
+    this.internalMcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
+      return {
+        tools: [
+          {
+            name: 'review_push_internal',
+            description: 'Internal tool for review and push workflow',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                branch: {
+                  type: 'string',
+                  description: 'Target branch to push to (optional, defaults to current branch)',
+                },
+              },
+              required: [],
+            },
+          },
+          {
+            name: 'git_status_internal',
+            description: 'Internal tool for git status',
+            inputSchema: {
+              type: 'object',
+              properties: {},
+              required: [],
+            },
+          },
+        ],
+      }
+    })
+
+    // Handle tool call request
+    this.internalMcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const { name, arguments: args = {} } = request.params
+
+      switch (name) {
+        case 'review_push_internal':
+          const result = await this.executeReviewPushInternal(args)
+          return {
+            content: [{ type: 'text', text: result }],
+          }
+
+        case 'git_status_internal':
+          const statusResult = await this.executeGitStatusInternal()
+          return {
+            content: [{ type: 'text', text: statusResult }],
+          }
+
+        default:
+          throw new Error(`Unknown internal tool: ${name}`)
+      }
+    })
+  }
+
+  private async handleInternalMcpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    let body = ''
+    req.on('data', (chunk) => {
+      body += chunk.toString()
+    })
+
+    req.on('end', async () => {
+      try {
+        const request = JSON.parse(body)
+        
+        // Create a mock transport to handle the request
+        const result = await this.processInternalMcpMessage(request)
+        
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify(result))
+      } catch (error) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }))
+      }
+    })
+  }
+
+  private async processInternalMcpMessage(message: any): Promise<any> {
+    if (!this.internalMcpServer) {
+      throw new Error('Internal MCP server not initialized')
+    }
+
+    // Process the MCP message using the internal server
+    // This is a simplified approach - in a real implementation, you'd properly handle the MCP protocol
+    if (message.method === 'tools/list') {
+      const handler = (this.internalMcpServer as any)._requestHandlers?.get('tools/list')
+      if (handler) {
+        const result = await handler(message)
+        return { jsonrpc: '2.0', id: message.id, result }
+      }
+    } else if (message.method === 'tools/call') {
+      const handler = (this.internalMcpServer as any)._requestHandlers?.get('tools/call')
+      if (handler) {
+        const result = await handler(message)
+        return { jsonrpc: '2.0', id: message.id, result }
+      }
+    }
+
+    throw new Error(`Unsupported method: ${message.method}`)
+  }
+
+  private async executeReviewPushInternal(args: any): Promise<string> {
+    try {
+      const targetBranch = args.branch
+      console.log('\n🔍 Internal MCP request: review_push_internal')
+
+      // Execute the same review-push workflow as the IDE command
+      const result = await this.executeReviewPushWorkflow(targetBranch)
+      
+      return result
+    } catch (error) {
+      const errorMsg = `Failed to execute internal review-push: ${error instanceof Error ? error.message : error}`
+      console.error('❌', errorMsg)
+      return errorMsg
+    }
+  }
+
+  private async executeGitStatusInternal(): Promise<string> {
+    try {
+      const workspaceFolder = this.options.workspaceFolder || process.cwd()
+      
+      // Get git status
+      const status = execSync('git status --porcelain', { 
+        cwd: workspaceFolder, 
+        encoding: 'utf8' 
+      })
+      
+      // Get unpushed commits
+      const unpushedCount = await this.gitReview.getUnpushedCommitCount()
+      
+      // Get current branch
+      const currentBranch = execSync('git branch --show-current', { 
+        cwd: workspaceFolder, 
+        encoding: 'utf8' 
+      }).trim()
+
+      let result = `Current branch: ${currentBranch}\n`
+      result += `Unpushed commits: ${unpushedCount}\n\n`
+      
+      if (status.trim()) {
+        result += 'Working directory changes:\n'
+        result += status
+      } else {
+        result += 'Working directory clean'
+      }
+
+      return result
+    } catch (error) {
+      return `Error getting git status: ${error instanceof Error ? error.message : error}`
+    }
+  }
+
+  // 既存のexecuteReviewPushWorkflowメソッドを使用するため、そのメソッドを探す必要があります
+  private async executeReviewPushWorkflow(targetBranch?: string): Promise<string> {
+    try {
+      // Show commit review
+      await this.gitReview.displayCommitReview()
+
+      // Get current branch for prompt
+      const currentBranch = execSync('git branch --show-current', { encoding: 'utf8' }).trim()
+      const branch = targetBranch || currentBranch
+
+      // Create a simple approval interface
+      const approved = await this.getApprovalFromUser(branch)
+      
+      if (approved) {
+        console.log('\n🚀 Initiating push workflow...')
+        const pushResult = await this.gitPush.autoPushFlow(branch, true)
+
+        if (pushResult.success && pushResult.pushed) {
+          return `✅ Push successful: ${pushResult.message}`
+        } else if (pushResult.success && !pushResult.pushed) {
+          return `📋 No push needed: ${pushResult.message}`
+        } else {
+          return `❌ Push failed: ${pushResult.message}`
+        }
+      } else {
+        // Handle rejection - undo commits
+        const unpushedCount = await this.gitReview.getUnpushedCommitCount()
+        
+        if (unpushedCount > 0) {
+          console.log(`\n🔄 Undoing ${unpushedCount} unpushed commit${unpushedCount > 1 ? 's' : ''}...`)
+          
+          // Reset to before unpushed commits but keep changes in working directory
+          const resetCommand = `git reset --soft HEAD~${unpushedCount}`
+          execSync(resetCommand)
+          
+          // Unstage all changes
+          execSync('git reset')
+          
+          return `✅ ${unpushedCount} commit${unpushedCount > 1 ? 's' : ''} undone successfully. Changes remain in working directory (unstaged).`
+        } else {
+          return '⚠️ No unpushed commits to undo.'
+        }
+      }
+    } catch (error) {
+      throw new Error(`Review-push workflow failed: ${error instanceof Error ? error.message : error}`)
+    }
+  }
+
+  private async getApprovalFromUser(branch: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      })
+
+      rl.question(`\n❓ Push to origin/${branch}? (y/n): `, (answer) => {
+        rl.close()
+        const response = answer.trim().toLowerCase()
+        resolve(response === 'y' || response === 'yes')
+      })
+    })
+  }
+
   async stop(): Promise<void> {
     if (this.rl) {
       this.rl.close()
@@ -1105,6 +1386,10 @@ export class ClaudeTermIDEServer {
 
     if (this.server) {
       this.server.close()
+    }
+
+    if (this.internalHttpServer) {
+      this.internalHttpServer.close()
     }
 
     // Clean up lock file
@@ -1245,6 +1530,7 @@ export class ClaudeTermIDEServer {
       console.log(`📝 Selected text (${selectedText.length} chars):`)
       console.log(selectedText.substring(0, 200) + (selectedText.length > 200 ? '...' : ''))
 
+      logMCPMessage('SEND', selectionMessage)
       this.connectedWS.send(JSON.stringify(selectionMessage))
       console.log(`\n✅ Selection sent to Claude Code!`)
     } catch (error) {
@@ -1253,7 +1539,7 @@ export class ClaudeTermIDEServer {
   }
 }
 
-export async function startIDEServer(options: IDEServerOptions): Promise<void> {
+export async function startIDEServer(options: IDEServerOptions): Promise<number> {
   // Check if an IDE with the same name already exists
   const ideName = options.ideName || 'claude-term'
   const ideDir = path.join(os.homedir(), '.claude', 'ide')
@@ -1269,11 +1555,18 @@ export async function startIDEServer(options: IDEServerOptions): Promise<void> {
           const port = parseInt(lockFile.replace('.lock', ''))
           console.log(`⚠️  IDE server "${ideName}" is already running on port ${port}`)
           console.log(`📁 Workspace: ${lockData.workspaceFolders?.[0] || 'unknown'}`)
-          console.log('\nOptions:')
-          console.log('1. Use the existing session in Claude with /ide')
-          console.log('2. Stop this and run: claude-term ide --name <different-name>')
-          console.log(`3. Remove lock file: rm ${lockPath}`)
-          process.exit(0)
+          
+          if (options.noWait) {
+            // When called from dual-server startup, return the existing port
+            console.log('📌 Using existing IDE server for MCP integration')
+            return port
+          } else {
+            console.log('\nOptions:')
+            console.log('1. Use the existing session in Claude with /ide')
+            console.log('2. Stop this and run: claude-term ide --name <different-name>')
+            console.log(`3. Remove lock file: rm ${lockPath}`)
+            process.exit(0)
+          }
         }
       } catch {
         // Ignore invalid lock files
@@ -1295,6 +1588,12 @@ export async function startIDEServer(options: IDEServerOptions): Promise<void> {
 
   try {
     const port = await server.start()
+    
+    // If this function is called with noWait flag, return the port without logging
+    if (options.noWait) {
+      return port
+    }
+    
     const workspace = options.workspaceFolder || process.cwd()
     const name = ideName
 
@@ -1310,6 +1609,7 @@ export async function startIDEServer(options: IDEServerOptions): Promise<void> {
 
     // Keep the process alive
     await new Promise(() => {}) // Never resolves
+    return port // This line will never be reached, but satisfies TypeScript
   } catch (error) {
     console.error('Failed to start IDE server:', error)
     process.exit(1)

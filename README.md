@@ -1,13 +1,14 @@
 # claude-term
 
-`claude-term` is a lightweight IDE server for Claude Code that enables AI-assisted coding entirely from the terminal. It provides full Claude Code functionality without requiring heavy GUI IDEs.
+`claude-term` is a lightweight IDE server and MCP server for Claude Code that enables AI-assisted coding entirely from the terminal. It provides full Claude Code functionality with custom tools without requiring heavy GUI IDEs.
 
 
 ## What is claude-term?
 
-Instead of using Claude Code through IDEs like VSCode or Cursor, `claude-term` acts as a minimal IDE server that Claude Code can connect to. This allows you to:
+Instead of using Claude Code through IDEs like VSCode or Cursor, `claude-term` provides both an IDE server and MCP server that Claude Code can connect to. This allows you to:
 
 - **Terminal-native AI coding**: Use Claude Code features in any terminal environment
+- **Custom MCP tools**: Specialized git workflow tools via Model Context Protocol
 - **Zero GUI dependencies**: No need for VSCode, Cursor, or other heavy IDEs
 - **Remote/headless friendly**: Perfect for SSH sessions and server environments  
 - **Your terminal, your rules**: Full control with native CLI tools integration
@@ -15,10 +16,16 @@ Instead of using Claude Code through IDEs like VSCode or Cursor, `claude-term` a
 ## Architecture
 
 ```
-┌─────────────┐    WebSocket/MCP    ┌──────────────┐
-│   Claude    │ ◄─────────────────► │ claude-term  │
-│   Code      │   selection_changed │ IDE Server   │
-└─────────────┘   file sharing      └──────────────┘
+┌─────────────┐    WebSocket         ┌──────────────┐
+│   Claude    │ ◄─────────────────── │ claude-term  │
+│   Code      │   selection_changed  │ IDE Server   │
+│             │   file sharing       │              │
+│             │                      └──────────────┘
+│             │    stdio MCP               │
+│             │ ◄─────────────────── ┌──────────────┐
+│             │   review_push        │ claude-term  │
+│             │   git_status         │ MCP Server   │
+└─────────────┘                      └──────────────┘
                                            │
                                            ▼
                                     ┌──────────────┐
@@ -31,7 +38,7 @@ Instead of using Claude Code through IDEs like VSCode or Cursor, `claude-term` a
 **Key Features:**
 - **Interactive Line Selection**: Select specific lines with fzf and send directly to Claude
 - **File Sharing**: Send complete files via `at_mentioned` events  
-- **Bidirectional MCP**: Full Model Context Protocol communication
+- **MCP Tools**: Custom git workflow tools via Model Context Protocol
 - **CLI Tool Integration**: Native fzf, bat, delta, and ripgrep integration
 
 ## Quick Start
@@ -48,7 +55,7 @@ npm run build
 
 ### Usage
 
-1. **Start claude-term IDE server** (in your project directory):
+1. **Start claude-term servers** (both IDE and MCP, in your project directory):
 ```bash
 cd /your/project
 node dist/cli.js start
@@ -56,17 +63,21 @@ node dist/cli.js start
 
 Output:
 ```
-🚀 claude-term IDE server started
-📦 IDE Name: claude-term-myproject  
+🚀 Starting claude-term servers...
 📁 Workspace: /your/project
-🔌 Port: 54321
+📦 IDE Name: claude-term-myproject
+
+✅ Both servers started successfully!
+🔌 IDE Server: Port 54321
+🔌 MCP Server: stdio transport
 
 📋 Next steps:
 1. In Claude, run: /ide
 2. Select: claude-term-myproject
-3. Start coding!
+3. Add MCP server: claude mcp add claude-term-myproject-tools node dist/mcp-server.js
+4. Start coding!
 
-Waiting for connection...
+Waiting for connections...
 ```
 
 2. **Connect from Claude Code**:
@@ -79,9 +90,18 @@ Then in Claude:
 /ide
 ```
 
-Select your `claude-term-myproject` from the list and start coding!
+Select your `claude-term-myproject` from the list.
 
-3. **Interactive Commands** (once connected):
+3. **Add MCP tools** (one-time setup):
+```bash
+claude mcp add claude-term-myproject-tools node dist/mcp-server.js
+```
+
+Now you have both IDE features and custom MCP tools available!
+
+4. **Interactive Commands** (once connected):
+
+**IDE Server Commands:**
 ```bash
 # 📁 File Operations
 /browse    # Interactive file picker with fzf
@@ -92,7 +112,7 @@ Select your `claude-term-myproject` from the list and start coding!
 /search "function.*authenticate"    # ripgrep-powered code search
 /active    # Show files Claude can access
 
-# 🚀 Git Workflow
+# 🚀 Git Workflow (IDE server)
 /review-push (/rp)    # Review unpushed commits and approve/reject for push
 
 # ℹ️ Help & Control
@@ -100,19 +120,75 @@ Select your `claude-term-myproject` from the list and start coding!
 /quit      # Exit the session
 ```
 
+**MCP Tools** (available directly in Claude Code):
+```bash
+# 🚀 Git Workflow (MCP tools)
+review_push    # Review and push commits via MCP
+git_status     # Get current git status and unpushed commits
+```
+
 ## Key Features
+
+### Dual Server Architecture
+
+`claude-term` provides both IDE server capabilities and MCP (Model Context Protocol) tools:
+
+- **IDE Server**: File operations, line selection, search, and interactive terminal commands
+- **MCP Server**: Custom tools for git workflows that integrate directly with Claude Code
+- **Single Command Setup**: Both servers start simultaneously with `node dist/cli.js start`
 
 ### Interactive Line Selection
 
 The standout feature of `claude-term` is **interactive line selection** with fzf:
 
+### MCP Tools Integration
+
+`claude-term` provides specialized MCP tools that integrate directly with Claude Code using a **dual-server architecture**:
+
+**Architecture:**
+- **IDE Server**: WebSocket server for `/ide` functionality + internal MCP server (port 12345)
+- **Standalone MCP Server**: stdio transport MCP server that forwards tool calls to IDE server
+- **Tool Forwarding**: MCP tool calls are forwarded via HTTP to execute in the IDE terminal
+
+**Available MCP Tools:**
+- **`review_push`**: Review unpushed commits and push after approval
+- **`git_status`**: Get current git status and unpushed commit count
+
+**Setup:**
+```bash
+# 1. Start both servers
+node dist/cli.js start
+
+# 2. Add MCP server to Claude Code
+claude mcp add claude-term-claude-term-tools node dist/mcp-server.js
+
+# 3. Use in Claude Code conversations
+```
+
+**How it works:**
+1. Claude Code spawns standalone MCP server process (stdio transport)
+2. Standalone MCP server forwards tool calls to running IDE server via HTTP
+3. Tools execute in the terminal where `claude-term start` is running
+4. Interactive prompts appear in your original terminal
+5. Results are forwarded back to Claude Code seamlessly
+
+**Example Usage:**
+```
+# In Claude Code, you can use:
+Can you check the current git status and then review and push any commits?
+```
+Claude Code will automatically use the `git_status` and `review_push` tools, but execution happens in your terminal.
+
 ### Git Review & Push Workflow
 
-`claude-term` includes a comprehensive Git workflow for reviewing and pushing commits safely:
+`claude-term` includes a comprehensive Git workflow (available both as IDE commands and MCP tools):
 
 ```bash
-# Review all unpushed commits with beautiful diff display
+# IDE Server command
 /review-push    # or /rp for short
+
+# MCP tool (used automatically by Claude Code)
+review_push     # Called directly by Claude
 ```
 
 **What happens:**
@@ -131,10 +207,11 @@ The standout feature of `claude-term` is **interactive line selection** with fzf
 - Double-checking complex changes
 - Safe collaboration workflows
 - Clean editing sessions without scattered diff outputs
+- AI-assisted code review (via MCP tools)
 
 **Enhanced Workflow:**
 - Claude Code edits files → Simple "📝 File modified" notifications
-- Use `/review-push` when ready → Comprehensive diff review with less pager
+- Use `/review-push` or let Claude use `review_push` MCP tool → Comprehensive diff review
 - Single y/n approval → Clean push or smart rollback
 
 ### Interactive Line Selection (continued)
@@ -199,17 +276,24 @@ The standout feature of `claude-term` is **interactive line selection** with fzf
 ## Command Line Options
 
 ```bash
-# Basic usage (uses current directory)
+# Start both IDE server and MCP server (recommended)
 node dist/cli.js start
 
-# Custom options
+# Custom options for IDE server
 node dist/cli.js start --name my-ide-server
 node dist/cli.js start --port 8080  
 node dist/cli.js start --workspace /path/to/project
 
+# Start only MCP server (stdio transport)
+node dist/cli.js mcp --name my-mcp-server
+
 # Enable debug logging
-CLAUDE_TERM_DEBUG=1 node dist/cli.js start --name debug-session
+node dist/cli.js start --debug
 ```
+
+**Available Commands:**
+- `start`: Start both IDE server and MCP server (recommended)
+- `mcp`: Start only MCP server with stdio transport
 
 ## Development
 
@@ -252,12 +336,17 @@ CLAUDE_TERM_DEBUG=1 node dist/cli.js start --name debug-test
 claude
 # Then /ide and select test-ide
 
-# Test core features (once connected)
+# Test core features
+# 1. IDE server features (once connected via /ide)
 /send package.json           # File sharing
 /browse                     # File browser
 /cat src/main.js            # Interactive line selection ⭐
 /search "export.*function"  # Code search
 /rp                         # Git review & push workflow ⭐
+
+# 2. MCP tools (available in Claude Code)
+# Ask Claude: "Can you check git status and review any commits?"
+# Claude will use git_status and review_push tools automatically
 ```
 
 ## Comparison with Traditional IDEs
@@ -268,8 +357,9 @@ claude
 | **Installation** | Complex setup | Simple npm install |
 | **Customization** | IDE-specific | Your terminal, your rules |
 | **Remote Work** | X11/VNC required | SSH-friendly |
-| **Integration** | IDE extensions | Native CLI tools |
+| **Integration** | IDE extensions | Native CLI tools + MCP |
 | **Line Selection** | Mouse/keyboard in GUI | fzf-powered terminal interface |
+| **AI Tools** | IDE-specific extensions | Custom MCP tools + IDE server |
 
 ## CLI Tool Dependencies (Recommended)
 
@@ -319,6 +409,13 @@ rm ~/.claude/ide/{port}.lock
 - Ensure Claude Code is connected (you see the interactive prompt `>`)
 - Check that files exist before sending: `ls path/to/file`
 - Use `/browse` for interactive file selection with preview
+
+### MCP Tools Issues
+- Ensure MCP server is added: `claude mcp list` should show your server
+- Check MCP server status: Look for "Added stdio MCP server..." message
+- Verify MCP server path: `node dist/mcp-server.js` should exist and be executable
+- For permission issues: Ensure the workspace directory is accessible
+- Debug MCP issues: Use `node dist/cli.js start --debug` for verbose logging
 
 ## Contributing
 
