@@ -1373,7 +1373,11 @@ export class ClaudeTermIDEServer {
       rl.question(`\n❓ Push to origin/${branch}? (y/n): `, (answer) => {
         rl.close()
         const response = answer.trim().toLowerCase()
-        resolve(response === 'y' || response === 'yes')
+        
+        // Small delay to ensure readline cleanup
+        setImmediate(() => {
+          resolve(response === 'y' || response === 'yes')
+        })
       })
     })
   }
@@ -1539,6 +1543,17 @@ export class ClaudeTermIDEServer {
   }
 }
 
+// Helper function to check if a process is still running
+function isProcessRunning(pid: number): boolean {
+  try {
+    // Signal 0 doesn't kill the process, just checks if it exists
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return false
+  }
+}
+
 export async function startIDEServer(options: IDEServerOptions): Promise<number> {
   // Check if an IDE with the same name already exists
   const ideName = options.ideName || 'claude-term'
@@ -1553,19 +1568,27 @@ export async function startIDEServer(options: IDEServerOptions): Promise<number>
 
         if (lockData.ideName === ideName) {
           const port = parseInt(lockFile.replace('.lock', ''))
-          console.log(`⚠️  IDE server "${ideName}" is already running on port ${port}`)
-          console.log(`📁 Workspace: ${lockData.workspaceFolders?.[0] || 'unknown'}`)
           
-          if (options.noWait) {
-            // When called from dual-server startup, return the existing port
-            console.log('📌 Using existing IDE server for MCP integration')
-            return port
+          // Check if the process is actually still running
+          if (isProcessRunning(lockData.pid)) {
+            console.log(`⚠️  IDE server "${ideName}" is already running on port ${port}`)
+            console.log(`📁 Workspace: ${lockData.workspaceFolders?.[0] || 'unknown'}`)
+            
+            if (options.noWait) {
+              // When called from dual-server startup, return the existing port
+              console.log('📌 Using existing IDE server for MCP integration')
+              return port
+            } else {
+              console.log('\nOptions:')
+              console.log('1. Use the existing session in Claude with /ide')
+              console.log('2. Stop this and run: claude-term ide --name <different-name>')
+              console.log(`3. Remove lock file: rm ${lockPath}`)
+              process.exit(0)
+            }
           } else {
-            console.log('\nOptions:')
-            console.log('1. Use the existing session in Claude with /ide')
-            console.log('2. Stop this and run: claude-term ide --name <different-name>')
-            console.log(`3. Remove lock file: rm ${lockPath}`)
-            process.exit(0)
+            // Process is dead, remove stale lock file
+            console.log(`🧹 Removing stale lock file for dead process (PID: ${lockData.pid})`)
+            fs.unlinkSync(lockPath)
           }
         }
       } catch {
@@ -1585,6 +1608,20 @@ export async function startIDEServer(options: IDEServerOptions): Promise<number>
 
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
+  process.on('SIGHUP', shutdown)
+  
+  // Handle uncaught exceptions to ensure cleanup
+  process.on('uncaughtException', async (error) => {
+    console.error('❌ Uncaught exception:', error)
+    await server.stop()
+    process.exit(1)
+  })
+  
+  process.on('unhandledRejection', async (reason, promise) => {
+    console.error('❌ Unhandled rejection at:', promise, 'reason:', reason)
+    await server.stop()
+    process.exit(1)
+  })
 
   try {
     const port = await server.start()
