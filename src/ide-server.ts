@@ -1283,20 +1283,23 @@ export class ClaudeTermIDEServer {
         // Check for unpushed commits
         const unpushedCount = await this.gitReview.getUnpushedCommitCount()
         
-        if (unpushedCount > 0) {
-          // Show commit review (same as /rp) only if there are commits to review
-          console.log(`\n📊 Found ${unpushedCount} unpushed commit${unpushedCount > 1 ? 's' : ''} to review`)
-          await this.gitReview.displayCommitReview()
-        } else {
-          console.log('✅ No unpushed commits to review.')
-        }
-
         // Get current branch for prompt
         const currentBranch = execSync('git branch --show-current', { encoding: 'utf8' }).trim()
         const branch = targetBranch || currentBranch
+        
+        if (unpushedCount > 0) {
+          // Show commit review (same as /rp) - this is what the user wants!
+          console.log(`\n📊 Found ${unpushedCount} unpushed commit${unpushedCount > 1 ? 's' : ''} to review`)
+          await this.gitReview.displayCommitReview()
 
-        // For MCP, auto-approve to avoid stdin issues
-        console.log(`\n🚀 Auto-approving push for MCP execution...`)
+          // For MCP, auto-approve after showing the review
+          console.log(`\n🚀 Auto-approving push after review (MCP execution)...`)
+        } else {
+          console.log('✅ No unpushed commits to review.')
+
+          // For MCP, proceed with push
+          console.log(`\n🚀 Auto-pushing (MCP mode - no commits to review)...`)
+        }
         
         const pushResult = await this.gitPush.autoPushFlow(branch, true)
         
