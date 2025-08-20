@@ -1291,16 +1291,64 @@ export class ClaudeTermIDEServer {
           // Show commit review (same as /rp) - this is what the user wants!
           console.log(`\n📊 Found ${unpushedCount} unpushed commit${unpushedCount > 1 ? 's' : ''} to review`)
           await this.gitReview.displayCommitReview()
-
-          // For MCP, auto-approve after showing the review
-          console.log(`\n🚀 Auto-approving push after review (MCP execution)...`)
         } else {
           console.log('✅ No unpushed commits to review.')
+        }
 
-          // For MCP, proceed with push
-          console.log(`\n🚀 Auto-pushing (MCP mode - no commits to review)...`)
+        // Ask for user approval even for MCP calls
+        // This works because we're running in the IDE Server's terminal
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout
+        })
+
+        const approved = await new Promise<boolean>((resolve) => {
+          rl.question(`\n❓ Push to origin/${branch}? (y/n): `, (answer) => {
+            rl.close()
+            const response = answer.trim().toLowerCase()
+            
+            // Small delay to ensure readline cleanup
+            setImmediate(() => {
+              resolve(response === 'y' || response === 'yes')
+            })
+          })
+        })
+
+        if (!approved) {
+          // Handle rejection - undo commits
+          const unpushedCount = await this.gitReview.getUnpushedCommitCount()
+          
+          if (unpushedCount > 0) {
+            console.log(`\n🔄 Undoing ${unpushedCount} unpushed commit${unpushedCount > 1 ? 's' : ''}...`)
+            
+            // Reset to before unpushed commits but keep changes in working directory
+            const resetCommand = `git reset --soft HEAD~${unpushedCount}`
+            execSync(resetCommand)
+            
+            // Unstage all changes
+            execSync('git reset')
+            
+            // Ensure readline is restored
+            if (wasReadlineActive) {
+              setTimeout(() => {
+                this.createReadlineInterface()
+              }, 200)
+            }
+            
+            return `✅ ${unpushedCount} commit${unpushedCount > 1 ? 's' : ''} undone successfully. Changes remain in working directory (unstaged).`
+          } else {
+            // Ensure readline is restored
+            if (wasReadlineActive) {
+              setTimeout(() => {
+                this.createReadlineInterface()
+              }, 200)
+            }
+            return '⚠️ No unpushed commits to undo.'
+          }
         }
         
+        // User approved, proceed with push
+        console.log(`\n🚀 Pushing to origin/${branch}...`)
         const pushResult = await this.gitPush.autoPushFlow(branch, true)
         
         // Ensure readline is properly restored

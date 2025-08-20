@@ -123,7 +123,7 @@ Now you have both IDE features and custom MCP tools available!
 **MCP Tools** (available directly in Claude Code):
 ```bash
 # 🚀 Git Workflow (MCP tools)  
-review_push    # Review and push commits via MCP (displays interactive review, then auto-approves)
+review_push    # Review and push commits via MCP (displays interactive review with user approval)
 git_status     # Get current git status and unpushed commits
 ```
 
