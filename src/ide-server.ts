@@ -9,6 +9,8 @@ import { execSync } from 'child_process'
 import * as readline from 'readline'
 import { GitReviewManager } from './git-review.js'
 import { GitPushManager } from './git-push.js'
+import { GitCommandManager } from './git-command-manager.js'
+import { GitCommandMapper, ArgValidator } from './git-command-mapping.js'
 import { FileDiscovery, FileInfo } from './file-discovery.js'
 import { debugLog, logMCPMessage, logWebSocketEvent } from './debug.js'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
@@ -33,12 +35,14 @@ export class ClaudeTermIDEServer {
   private rl: readline.Interface | null = null
   private gitReview: GitReviewManager
   private gitPush: GitPushManager
+  private gitCommandManager: GitCommandManager
+  private gitCommandMapper: GitCommandMapper
   private waitingForApproval: boolean = false
   private fileDiscovery: FileDiscovery
   private fileCache: FileInfo[] = []
   private cacheTimestamp: number = 0
   private readonly CACHE_TTL = 30000 // 30 seconds
-  
+
   // Internal MCP Server for communication with standalone MCP
   private internalMcpServer: Server | null = null
   private internalHttpServer: any = null
@@ -48,6 +52,8 @@ export class ClaudeTermIDEServer {
     this.authToken = randomUUID()
     this.gitReview = new GitReviewManager()
     this.gitPush = new GitPushManager()
+    this.gitCommandManager = new GitCommandManager(this.options.workspaceFolder)
+    this.gitCommandMapper = new GitCommandMapper(this.gitCommandManager)
     this.fileDiscovery = new FileDiscovery()
   }
 
@@ -546,7 +552,7 @@ export class ClaudeTermIDEServer {
   }
 
   private completeCommand(line: string): [string[], string] {
-    const commands = [
+    const coreCommands = [
       '/help',
       '/send ',
       '/cat ',
@@ -557,8 +563,22 @@ export class ClaudeTermIDEServer {
       '/rp',
     ]
 
-    // If we have file path completion for /cat or /send
-    if (line.startsWith('/cat ') || line.startsWith('/send ')) {
+    // Build complete command list with git commands if in git repository
+    const commands = [...coreCommands]
+    
+    if (this.isGitRepository()) {
+      const gitCommands = this.gitCommandMapper.getCompletions('')
+      gitCommands.forEach(cmd => {
+        if (cmd === '/ga') {
+          commands.push('/ga ')  // Add space for file completion
+        } else {
+          commands.push(cmd)
+        }
+      })
+    }
+
+    // If we have file path completion for /cat, /send, or /ga
+    if (line.startsWith('/cat ') || line.startsWith('/send ') || line.startsWith('/ga ')) {
       const parts = line.split(' ')
       if (parts.length >= 2) {
         const pathPrefix = parts.slice(1).join(' ')
@@ -585,6 +605,16 @@ export class ClaudeTermIDEServer {
             return [fileHits.map((file) => commandPrefix + file), line]
           }
         }
+      }
+    }
+
+    // Check if this is a git command prefix being typed
+    if (line.startsWith('/g') && line.length > 1) {
+      const gitHits = this.gitCommandMapper.getCompletions(line)
+      if (gitHits.length > 0) {
+        // Add space for /ga command to enable file completion
+        const processedHits = gitHits.map(cmd => cmd === '/ga' ? '/ga ' : cmd)
+        return [processedHits, line]
       }
     }
 
@@ -779,15 +809,7 @@ export class ClaudeTermIDEServer {
     }
 
     if (trimmed === '/help') {
-      console.log('Available commands:')
-      console.log('  /send <path> - Send file to Claude directly')
-      console.log('  /browse - Browse and interact with files (recommended)')
-      console.log('  /cat <path> - Display file interactively, select text to send to Claude')
-      console.log('  /search <pattern> - Search code with ripgrep')
-      console.log('  /active - Show active files (resources)')
-      console.log('  /review-push (/rp) - Review unpushed commits and approve/reject for push')
-      console.log('  /help - Show this help message')
-      console.log('  /quit - Stop the server and exit')
+      this.displayHelp()
     } else if (trimmed === '/quit') {
       console.log('Stopping IDE server...')
       this.stop()
@@ -820,9 +842,108 @@ export class ClaudeTermIDEServer {
       }
     } else if (trimmed === '/review-push' || trimmed === '/rp') {
       await this.handleReviewPushCommand()
+    } else if (ArgValidator.isValidGitCommand(trimmed.split(' ')[0])) {
+      // Handle git commands
+      await this.handleGitCommand(trimmed)
     } else if (trimmed.startsWith('/')) {
       console.log(`Unknown command: ${trimmed}`)
       console.log('Type /help for available commands')
+    }
+  }
+
+  private displayHelp(): void {
+    console.log('📋 Claude Term IDE Server - Available Commands')
+    console.log('═══════════════════════════════════════════════')
+    
+    console.log('\n🔧 File Operations:')
+    console.log('  /send <path>     - Send file to Claude directly')
+    console.log('  /cat <path>      - Display file interactively, select text to send to Claude')
+    console.log('  /search <pattern> - Search code with ripgrep')
+    console.log('  /active          - Show active files (resources)')
+    
+    console.log('\n🔄 Git Integration:')
+    const isGitRepo = this.isGitRepository()
+    if (isGitRepo) {
+      const gitHelp = this.gitCommandMapper.getHelpText()
+        .replace('Git Commands:', '')
+        .trim()
+        .split('\n')
+        .map(line => line.trim() ? `  ${line}` : line)
+        .join('\n')
+      console.log(gitHelp)
+    } else {
+      console.log('  ❌ Not a git repository - run "git init" to enable git commands')
+      console.log('  📝 Once initialized, use /gs, /gd, /gl, /gb, /ga, /gc commands')
+    }
+    
+    console.log('\n🚀 Advanced:')
+    console.log('  /review-push (/rp) - Review unpushed commits and approve/reject for push')
+    
+    console.log('\n❓ Help & Control:')
+    console.log('  /help            - Show this help message')
+    console.log('  /quit            - Stop the server and exit')
+    
+    console.log('\n💡 Tips:')
+    console.log('  • Use Tab completion for file paths and commands')
+    console.log('  • Git commands integrate seamlessly with existing workflow')
+    console.log('  • Use /review-push for safe collaborative development')
+  }
+
+  private async handleGitCommand(input: string): Promise<void> {
+    try {
+      const parts = input.trim().split(/\s+/)
+      const command = parts[0]
+      const args = parts.slice(1)
+
+      // Validate workspace is a git repository before executing commands
+      if (!this.isGitRepository()) {
+        console.log('❌ Not a git repository. Initialize git first with: git init')
+        return
+      }
+
+      // Log git command execution for debugging
+      debugLog('GIT', `Executing git command: ${command} ${args.join(' ')}`, { 
+        workspaceFolder: this.options.workspaceFolder || process.cwd() 
+      })
+
+      const result = await this.gitCommandMapper.executeCommand(command, args)
+
+      if (result.success) {
+        // Display output with proper formatting
+        if (result.output.trim()) {
+          console.log(result.output)
+        } else {
+          console.log('✅ Command completed successfully')
+        }
+        
+        // Log successful execution
+        debugLog('GIT', `Git command succeeded: ${command}`)
+      } else {
+        console.log(`❌ Git command failed: ${result.error || result.output}`)
+        
+        // Provide helpful hints for common errors
+        this.provideGitCommandHints(command, result.error || result.output)
+      }
+    } catch (error) {
+      console.error('❌ Error executing git command:', error instanceof Error ? error.message : error)
+      console.log('💡 Use /help to see available commands or check git status')
+    }
+  }
+
+  private isGitRepository(): boolean {
+    return this.gitCommandManager.isGitRepository()
+  }
+
+  private provideGitCommandHints(command: string, error: string): void {
+    // Provide helpful hints based on common git errors
+    if (error.includes('nothing to commit')) {
+      console.log('💡 Hint: Use /gs to check status, /ga <file> to stage files')
+    } else if (error.includes('pathspec') && error.includes('did not match')) {
+      console.log('💡 Hint: File not found. Use /cat or /send with tab completion to find files')
+    } else if (command === '/ga' && error.includes('Failed to stage')) {
+      console.log('💡 Hint: Check if files exist. Use /search <pattern> to find files')
+    } else if (command === '/gc' && error.includes('Nothing staged')) {
+      console.log('💡 Hint: Stage files first with /ga <file>, then create commit')
     }
   }
 
@@ -875,9 +996,17 @@ export class ClaudeTermIDEServer {
   }
 
   private createReadlineInterface(): void {
-    // Clear any pending input before creating new readline
-    if (process.stdin.readable) {
+    // Properly drain any pending input before creating new readline
+    if (process.stdin.readable && !process.stdin.readableEnded) {
+      // Read and discard any buffered input
+      process.stdin.setRawMode?.(false)
       process.stdin.pause()
+
+      // Clear input buffer more thoroughly
+      while (process.stdin.read() !== null) {
+        // Consume all buffered input
+      }
+
       process.stdin.resume()
     }
 
@@ -1135,7 +1264,7 @@ export class ClaudeTermIDEServer {
         capabilities: {
           tools: {},
         },
-      }
+      },
     )
 
     this.setupInternalMcpTools()
@@ -1227,10 +1356,10 @@ export class ClaudeTermIDEServer {
     req.on('end', async () => {
       try {
         const request = JSON.parse(body)
-        
+
         // Create a mock transport to handle the request
         const result = await this.processInternalMcpMessage(request)
-        
+
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify(result))
       } catch (error) {
@@ -1271,7 +1400,7 @@ export class ClaudeTermIDEServer {
 
       // Execute the same review workflow as /rp command
       // The issue is that we need to handle the readline state properly after less exits
-      
+
       // Save current readline state
       const wasReadlineActive = !!this.rl
       if (this.rl) {
@@ -1282,83 +1411,103 @@ export class ClaudeTermIDEServer {
       try {
         // Check for unpushed commits
         const unpushedCount = await this.gitReview.getUnpushedCommitCount()
-        
+
         // Get current branch for prompt
         const currentBranch = execSync('git branch --show-current', { encoding: 'utf8' }).trim()
         const branch = targetBranch || currentBranch
-        
+
         if (unpushedCount > 0) {
           // Show commit review (same as /rp) - this is what the user wants!
-          console.log(`\n📊 Found ${unpushedCount} unpushed commit${unpushedCount > 1 ? 's' : ''} to review`)
+          console.log(
+            `\n📊 Found ${unpushedCount} unpushed commit${unpushedCount > 1 ? 's' : ''} to review`,
+          )
           await this.gitReview.displayCommitReview()
         } else {
           console.log('✅ No unpushed commits to review.')
         }
 
-        // Ask for user approval even for MCP calls
-        // This works because we're running in the IDE Server's terminal
-        const rl = readline.createInterface({
-          input: process.stdin,
-          output: process.stdout
-        })
+        // Ask for user approval - reuse existing readline or create temporary one
+        let rlToUse: readline.Interface
+        let shouldCloseRl = false
+
+        if (this.rl) {
+          // Reuse existing readline interface
+          rlToUse = this.rl
+        } else {
+          // Create temporary readline if none exists
+          rlToUse = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+          })
+          shouldCloseRl = true
+        }
 
         const approved = await new Promise<boolean>((resolve) => {
-          rl.question(`\n❓ Push to origin/${branch}? (y/n): `, (answer) => {
-            rl.close()
+          // Save current prompt state
+          const oldPrompt = this.rl?.getPrompt?.() || '> '
+
+          rlToUse.question(`\n❓ Push to origin/${branch}? (y/n): `, (answer) => {
             const response = answer.trim().toLowerCase()
-            
-            // Small delay to ensure readline cleanup
-            setImmediate(() => {
-              resolve(response === 'y' || response === 'yes')
-            })
+
+            // Only close if we created a temporary readline
+            if (shouldCloseRl) {
+              rlToUse.close()
+            } else {
+              // Restore prompt for existing readline
+              rlToUse.setPrompt(oldPrompt)
+            }
+
+            resolve(response === 'y' || response === 'yes')
           })
         })
 
         if (!approved) {
           // Handle rejection - undo commits
           const unpushedCount = await this.gitReview.getUnpushedCommitCount()
-          
+
           if (unpushedCount > 0) {
-            console.log(`\n🔄 Undoing ${unpushedCount} unpushed commit${unpushedCount > 1 ? 's' : ''}...`)
-            
+            console.log(
+              `\n🔄 Undoing ${unpushedCount} unpushed commit${unpushedCount > 1 ? 's' : ''}...`,
+            )
+
             // Reset to before unpushed commits but keep changes in working directory
             const resetCommand = `git reset --soft HEAD~${unpushedCount}`
             execSync(resetCommand)
-            
+
             // Unstage all changes
             execSync('git reset')
-            
-            // Ensure readline is restored
-            if (wasReadlineActive) {
-              setTimeout(() => {
-                this.createReadlineInterface()
-              }, 200)
+
+            // Ensure readline is restored if it was closed
+            if (wasReadlineActive && !this.rl) {
+              this.createReadlineInterface()
+            } else if (this.rl) {
+              ;(this.rl as any).prompt()
             }
-            
+
             return `✅ ${unpushedCount} commit${unpushedCount > 1 ? 's' : ''} undone successfully. Changes remain in working directory (unstaged).`
           } else {
-            // Ensure readline is restored
-            if (wasReadlineActive) {
-              setTimeout(() => {
-                this.createReadlineInterface()
-              }, 200)
+            // Ensure readline is restored if it was closed
+            if (wasReadlineActive && !this.rl) {
+              this.createReadlineInterface()
+            } else if (this.rl) {
+              ;(this.rl as any).prompt()
             }
             return '⚠️ No unpushed commits to undo.'
           }
         }
-        
+
         // User approved, proceed with push
         console.log(`\n🚀 Pushing to origin/${branch}...`)
         const pushResult = await this.gitPush.autoPushFlow(branch, true)
-        
-        // Ensure readline is properly restored
-        if (wasReadlineActive) {
-          // Small delay to let terminal settle after less and push operations
-          setTimeout(() => {
-            this.createReadlineInterface()
-          }, 200)
+
+        // Ensure readline is properly restored if it was closed
+        if (wasReadlineActive && !this.rl) {
+          this.createReadlineInterface()
+        } else if (this.rl) {
+          // If readline still exists, just show the prompt again
+          ;(this.rl as any).prompt()
         }
-        
+
         if (pushResult.success && pushResult.pushed) {
           return `✅ Push successful: ${pushResult.message}`
         } else if (pushResult.success && !pushResult.pushed) {
@@ -1385,25 +1534,25 @@ export class ClaudeTermIDEServer {
   private async executeGitStatusInternal(): Promise<string> {
     try {
       const workspaceFolder = this.options.workspaceFolder || process.cwd()
-      
+
       // Get git status
-      const status = execSync('git status --porcelain', { 
-        cwd: workspaceFolder, 
-        encoding: 'utf8' 
+      const status = execSync('git status --porcelain', {
+        cwd: workspaceFolder,
+        encoding: 'utf8',
       })
-      
+
       // Get unpushed commits
       const unpushedCount = await this.gitReview.getUnpushedCommitCount()
-      
+
       // Get current branch
-      const currentBranch = execSync('git branch --show-current', { 
-        cwd: workspaceFolder, 
-        encoding: 'utf8' 
+      const currentBranch = execSync('git branch --show-current', {
+        cwd: workspaceFolder,
+        encoding: 'utf8',
       }).trim()
 
       let result = `Current branch: ${currentBranch}\n`
       result += `Unpushed commits: ${unpushedCount}\n\n`
-      
+
       if (status.trim()) {
         result += 'Working directory changes:\n'
         result += status
@@ -1416,8 +1565,6 @@ export class ClaudeTermIDEServer {
       return `Error getting git status: ${error instanceof Error ? error.message : error}`
     }
   }
-
-
 
   async stop(): Promise<void> {
     if (this.rl) {
@@ -1578,6 +1725,7 @@ export class ClaudeTermIDEServer {
       console.error('Error processing fzf selection:', error)
     }
   }
+
 }
 
 // Helper function to check if a process is still running
@@ -1605,12 +1753,12 @@ export async function startIDEServer(options: IDEServerOptions): Promise<number>
 
         if (lockData.ideName === ideName) {
           const port = parseInt(lockFile.replace('.lock', ''))
-          
+
           // Check if the process is actually still running
           if (isProcessRunning(lockData.pid)) {
             console.log(`⚠️  IDE server "${ideName}" is already running on port ${port}`)
             console.log(`📁 Workspace: ${lockData.workspaceFolders?.[0] || 'unknown'}`)
-            
+
             if (options.noWait) {
               // When called from dual-server startup, return the existing port
               console.log('📌 Using existing IDE server for MCP integration')
@@ -1646,14 +1794,14 @@ export async function startIDEServer(options: IDEServerOptions): Promise<number>
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
   process.on('SIGHUP', shutdown)
-  
+
   // Handle uncaught exceptions to ensure cleanup
   process.on('uncaughtException', async (error) => {
     console.error('❌ Uncaught exception:', error)
     await server.stop()
     process.exit(1)
   })
-  
+
   process.on('unhandledRejection', async (reason, promise) => {
     console.error('❌ Unhandled rejection at:', promise, 'reason:', reason)
     await server.stop()
@@ -1662,12 +1810,12 @@ export async function startIDEServer(options: IDEServerOptions): Promise<number>
 
   try {
     const port = await server.start()
-    
+
     // If this function is called with noWait flag, return the port without logging
     if (options.noWait) {
       return port
     }
-    
+
     const workspace = options.workspaceFolder || process.cwd()
     const name = ideName
 

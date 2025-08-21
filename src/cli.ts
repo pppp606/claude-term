@@ -53,7 +53,7 @@ program
             debug: options.debug,
             noWait: true,
             ideServerPort: internalMcpPort,
-          })
+          }),
         ])
 
         console.log('\n✅ Both servers started successfully!')

@@ -55,7 +55,7 @@ export class GitPushManager {
       rl.question(prompt, (answer) => {
         rl.close()
         const response = answer.toLowerCase().trim()
-        
+
         // Small delay to ensure readline cleanup
         setImmediate(() => {
           resolve(response === 'y' || response === 'yes')
@@ -76,7 +76,7 @@ export class GitPushManager {
           stdio: 'inherit',
         })
         console.log(`✅ Successfully pushed to origin/${branchName}`)
-        
+
         // Ensure stdout/stdin are properly flushed and reset
         if (process.stdout.isTTY) {
           process.stdout.write('')

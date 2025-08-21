@@ -131,22 +131,24 @@ index 123..456 100644
   describe('getChangedFiles', () => {
     it('should return list of changed files for HEAD commit', async () => {
       const files = await gitReview.getChangedFiles()
-      
+
       expect(Array.isArray(files)).toBe(true)
       // Should work even if no files changed
     })
 
     it('should handle invalid commit range', async () => {
-      await expect(gitReview.getChangedFiles('invalid-range')).rejects.toThrow('Failed to get changed files')
+      await expect(gitReview.getChangedFiles('invalid-range')).rejects.toThrow(
+        'Failed to get changed files',
+      )
     })
   })
 
   describe('getFileDiffs', () => {
     it('should return file diffs for HEAD commit', async () => {
       const fileDiffs = await gitReview.getFileDiffs()
-      
+
       expect(Array.isArray(fileDiffs)).toBe(true)
-      fileDiffs.forEach(fileDiff => {
+      fileDiffs.forEach((fileDiff) => {
         expect(fileDiff).toHaveProperty('file')
         expect(fileDiff).toHaveProperty('diff')
         expect(typeof fileDiff.file).toBe('string')
@@ -155,14 +157,16 @@ index 123..456 100644
     })
 
     it('should handle invalid commit range', async () => {
-      await expect(gitReview.getFileDiffs('invalid-range')).rejects.toThrow('Failed to get file diffs')
+      await expect(gitReview.getFileDiffs('invalid-range')).rejects.toThrow(
+        'Failed to get file diffs',
+      )
     })
   })
 
   describe('getUnpushedCommitCount', () => {
     it('should return number of unpushed commits', async () => {
       const count = await gitReview.getUnpushedCommitCount()
-      
+
       expect(typeof count).toBe('number')
       expect(count).toBeGreaterThanOrEqual(0)
     })

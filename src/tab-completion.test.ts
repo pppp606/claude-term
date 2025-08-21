@@ -6,7 +6,7 @@ describe('Tab Completion', () => {
 
   beforeEach(() => {
     server = new ClaudeTermIDEServer()
-    
+
     // Mock file cache with sample files
     const mockFiles: FileInfo[] = [
       {
@@ -46,7 +46,7 @@ describe('Tab Completion', () => {
         lastModified: new Date(),
       },
     ]
-    
+
     // Set mock cache
     ;(server as any).fileCache = mockFiles
     ;(server as any).cacheTimestamp = Date.now()
@@ -56,9 +56,9 @@ describe('Tab Completion', () => {
     it('should find common prefix for similar strings', () => {
       const commonPrefix = (server as any).findCommonPrefix([
         'src/components/UserProfile.tsx',
-        'src/components/UserList.tsx'
+        'src/components/UserList.tsx',
       ])
-      
+
       expect(commonPrefix).toBe('src/components/User')
     })
 
@@ -70,7 +70,7 @@ describe('Tab Completion', () => {
     it('should return empty string for no common prefix', () => {
       const commonPrefix = (server as any).findCommonPrefix([
         'src/components/UserProfile.tsx',
-        'package.json'
+        'package.json',
       ])
       expect(commonPrefix).toBe('')
     })
@@ -84,7 +84,7 @@ describe('Tab Completion', () => {
   describe('completeCommand', () => {
     it('should complete single file match with command prefix', () => {
       const [completions, originalLine] = (server as any).completeCommand('/send package')
-      
+
       expect(completions).toHaveLength(1)
       expect(completions[0]).toBe('/send package.json')
       expect(originalLine).toBe('/send package')
@@ -92,7 +92,7 @@ describe('Tab Completion', () => {
 
     it('should provide common prefix for multiple matches with command prefix', () => {
       const [completions] = (server as any).completeCommand('/send User')
-      
+
       // Should either return common prefix or all matches (with /send prefix)
       expect(completions.length).toBeGreaterThan(0)
       if (completions.length === 1) {
@@ -108,7 +108,7 @@ describe('Tab Completion', () => {
 
     it('should return multiple completions with command prefix', () => {
       const [completions] = (server as any).completeCommand('/cat ')
-      
+
       expect(completions.length).toBeGreaterThan(1)
       // Should include command prefix
       expect(completions[0]).toContain('/cat ')
@@ -116,19 +116,19 @@ describe('Tab Completion', () => {
 
     it('should handle non-file commands', () => {
       const [completions] = (server as any).completeCommand('/he')
-      
+
       expect(completions).toContain('/help')
     })
 
     it('should return empty for no matches', () => {
       const [completions] = (server as any).completeCommand('/send nonexistent')
-      
+
       expect(completions).toEqual([])
     })
 
     it('should handle /cat command with command prefix', () => {
       const [completions] = (server as any).completeCommand('/cat user')
-      
+
       expect(completions.length).toBeGreaterThan(0)
       expect(completions.some((c: string) => c.includes('userHelper.ts'))).toBe(true)
       // Should contain command prefix
@@ -139,27 +139,27 @@ describe('Tab Completion', () => {
   describe('getFileCompletionsSync', () => {
     it('should return filename prefix matches only', () => {
       const completions = (server as any).getFileCompletionsSync('user')
-      
+
       expect(completions.length).toBeGreaterThan(0)
       expect(completions).toContain('src/utils/userHelper.ts')
     })
 
     it('should return exact filename matches', () => {
       const completions = (server as any).getFileCompletionsSync('package.json')
-      
+
       expect(completions[0]).toBe('package.json')
     })
 
     it('should handle empty prefix', () => {
       const completions = (server as any).getFileCompletionsSync('')
-      
+
       expect(completions.length).toBeGreaterThan(0)
       expect(completions.length).toBeLessThanOrEqual(10)
     })
 
     it('should match path prefix (case insensitive)', () => {
       const completions = (server as any).getFileCompletionsSync('src/components/User')
-      
+
       expect(completions.length).toBeGreaterThan(0)
       expect(completions.some((c: string) => c.includes('UserProfile.tsx'))).toBe(true)
       expect(completions.some((c: string) => c.includes('UserList.tsx'))).toBe(true)
@@ -167,7 +167,7 @@ describe('Tab Completion', () => {
 
     it('should match filename prefix when no path separator', () => {
       const completions = (server as any).getFileCompletionsSync('User')
-      
+
       expect(completions.length).toBeGreaterThan(0)
       expect(completions.some((c: string) => c.includes('UserProfile.tsx'))).toBe(true)
       expect(completions.some((c: string) => c.includes('UserList.tsx'))).toBe(true)
@@ -185,16 +185,16 @@ describe('Tab Completion', () => {
         lastModified: new Date(),
       }
       ;(server as any).fileCache.push(mockGitFile)
-      
+
       const completions = (server as any).getFileCompletionsSync('config')
-      
+
       // Should not include .git/config
       expect(completions.every((c: string) => !c.startsWith('.git/'))).toBe(true)
     })
 
     it('should sort by path length then alphabetically', () => {
       const completions = (server as any).getFileCompletionsSync('src/')
-      
+
       if (completions.length > 1) {
         // First should be shorter or same length, then alphabetical
         const firstLen = completions[0].length
@@ -225,18 +225,18 @@ describe('Tab Completion', () => {
           lastModified: new Date(),
         },
       ]
-      
+
       // Note: In real usage, these files would already be filtered out by FileDiscovery
       // This test verifies that if they somehow made it to cache, they'd be filtered out
       const originalCache = (server as any).fileCache
       ;(server as any).fileCache = [...originalCache, ...mockIgnoredFiles]
-      
+
       const completions = (server as any).getFileCompletionsSync('index')
-      
+
       // Should not include node_modules or dist files
       expect(completions.every((c: string) => !c.startsWith('node_modules/'))).toBe(true)
       expect(completions.every((c: string) => !c.startsWith('dist/'))).toBe(true)
-      
+
       // Restore original cache
       ;(server as any).fileCache = originalCache
     })
@@ -244,7 +244,7 @@ describe('Tab Completion', () => {
     it('should support path completion like terminal', () => {
       // Test path completion: /cat src/c should match src/cli.* files
       const completions = (server as any).getFileCompletionsSync('src/c')
-      
+
       // Should find files starting with src/c
       expect(completions.length).toBeGreaterThan(0)
       expect(completions.every((c: string) => c.startsWith('src/c'))).toBe(true)
@@ -272,17 +272,17 @@ describe('Tab Completion', () => {
           lastModified: new Date(),
         },
       ]
-      
+
       const originalCache = (server as any).fileCache
       ;(server as any).fileCache = [...originalCache, ...mockFiles]
-      
+
       // Test common prefix finding
       const completions = (server as any).getFileCompletionsSync('src/cli')
       const commonPrefix = (server as any).findCommonPrefix(completions)
-      
+
       // Should find common prefix between src/cli.ts and src/cli.test.ts
       expect(commonPrefix).toBe('src/cli.t')
-      
+
       // Restore original cache
       ;(server as any).fileCache = originalCache
     })
