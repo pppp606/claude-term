@@ -100,6 +100,7 @@ node dist/cli.js --version
 
 ### タスク作成 (Task Tool使用)
 - github issue #$ARGUMENTS を参照
+- **重要**: issueに「🔍 仕様明確化」セクションがある場合、「質問と回答」を必ず参照して実装方針を確認
 - このissueの内容を良く理解してタスク化してください
 - TDDメソッドを使用してタスク化
 - タスクはTodosで保持
