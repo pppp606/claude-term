@@ -864,7 +864,13 @@ export class ClaudeTermIDEServer {
     console.log('\n🔄 Git Integration:')
     const isGitRepo = this.isGitRepository()
     if (isGitRepo) {
-      console.log(this.gitCommandMapper.getHelpText().replace('Git Commands:', '').trim())
+      const gitHelp = this.gitCommandMapper.getHelpText()
+        .replace('Git Commands:', '')
+        .trim()
+        .split('\n')
+        .map(line => line.trim() ? `  ${line}` : line)
+        .join('\n')
+      console.log(gitHelp)
     } else {
       console.log('  ❌ Not a git repository - run "git init" to enable git commands')
       console.log('  📝 Once initialized, use /gs, /gd, /gl, /gb, /ga, /gc commands')
