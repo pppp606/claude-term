@@ -13,6 +13,19 @@ describe('GitCommandManager', () => {
     })
   })
 
+  describe('isGitRepository', () => {
+    it('should return true for git repository directory', () => {
+      const result = gitCommandManager.isGitRepository()
+      expect(result).toBe(true)
+    })
+
+    it('should return false for non-git directory', () => {
+      const nonGitManager = new GitCommandManager('/tmp')
+      const result = nonGitManager.isGitRepository()
+      expect(result).toBe(false)
+    })
+  })
+
   describe('getStatus', () => {
     it('should return git status information', async () => {
       const status = await gitCommandManager.getStatus()
