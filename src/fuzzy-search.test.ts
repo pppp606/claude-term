@@ -59,7 +59,7 @@ describe('FuzzySearch', () => {
   describe('search', () => {
     it('should find exact matches with highest score', () => {
       const results = fuzzySearch.search('package.json', sampleFiles)
-      
+
       expect(results).toHaveLength(1)
       expect(results[0].file.name).toBe('package.json')
       expect(results[0].score).toBeGreaterThan(0.9)
@@ -67,38 +67,38 @@ describe('FuzzySearch', () => {
 
     it('should find fuzzy matches by filename', () => {
       const results = fuzzySearch.search('user', sampleFiles)
-      
+
       expect(results.length).toBeGreaterThan(0)
-      const userFiles = results.map(r => r.file.name)
+      const userFiles = results.map((r) => r.file.name)
       expect(userFiles).toContain('UserProfile.tsx')
       expect(userFiles).toContain('userHelper.ts')
     })
 
     it('should find matches by path components', () => {
       const results = fuzzySearch.search('comp', sampleFiles)
-      
+
       expect(results.length).toBeGreaterThan(0)
-      const componentFiles = results.filter(r => r.file.directory.includes('components'))
+      const componentFiles = results.filter((r) => r.file.directory.includes('components'))
       expect(componentFiles.length).toBeGreaterThan(0)
     })
 
     it('should rank exact matches higher than fuzzy matches', () => {
       const results = fuzzySearch.search('README', sampleFiles)
-      
+
       expect(results[0].file.name).toBe('README.md')
       expect(results[0].score).toBeGreaterThan(0.8)
     })
 
     it('should handle case-insensitive search', () => {
       const results = fuzzySearch.search('userprofile', sampleFiles)
-      
+
       expect(results.length).toBeGreaterThan(0)
       expect(results[0].file.name).toBe('UserProfile.tsx')
     })
 
     it('should limit results to specified count', () => {
       const results = fuzzySearch.search('', sampleFiles, 3)
-      
+
       expect(results).toHaveLength(3)
     })
 
@@ -127,13 +127,13 @@ describe('FuzzySearch', () => {
 
     it('should return empty array for no matches', () => {
       const results = fuzzySearch.search('nonexistent', sampleFiles)
-      
+
       expect(results).toEqual([])
     })
 
     it('should handle empty query gracefully', () => {
       const results = fuzzySearch.search('', sampleFiles)
-      
+
       expect(results).toHaveLength(sampleFiles.length)
       // Should return all files, possibly sorted by some criteria
     })
@@ -143,7 +143,7 @@ describe('FuzzySearch', () => {
     it('should score based on match quality', () => {
       const exactMatch = fuzzySearch.search('package.json', sampleFiles)[0]
       const fuzzyMatch = fuzzySearch.search('pack', sampleFiles)[0]
-      
+
       expect(exactMatch.score).toBeGreaterThan(fuzzyMatch.score)
     })
 
@@ -170,7 +170,7 @@ describe('FuzzySearch', () => {
       ]
 
       const results = fuzzySearch.search('user', files)
-      
+
       // Filename match should score higher than directory match
       expect(results[0].file.name).toBe('userProfile.ts')
     })

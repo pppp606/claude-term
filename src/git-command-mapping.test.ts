@@ -9,7 +9,7 @@ describe('GitCommandMapping', () => {
   let gitCommandManager: GitCommandManager
 
   beforeEach(() => {
-    gitCommandManager = new GitCommandManager()
+    gitCommandManager = new GitCommandManager(process.cwd())
     commandMapper = new GitCommandMapper(gitCommandManager)
   })
 

@@ -28,16 +28,22 @@ export interface GitOperationResult {
 }
 
 export class GitCommandManager {
-  constructor() {}
+  constructor(private workspaceFolder?: string) {}
 
   async getStatus(): Promise<GitStatus> {
     return Promise.resolve().then(() => {
       try {
         // Get current branch
-        const branch = execSync('git branch --show-current', { encoding: 'utf8' }).trim()
+        const branch = execSync('git branch --show-current', { 
+          encoding: 'utf8',
+          cwd: this.workspaceFolder 
+        }).trim()
 
         // Get status with porcelain format for easy parsing
-        const statusOutput = execSync('git status --porcelain', { encoding: 'utf8' }).trim()
+        const statusOutput = execSync('git status --porcelain', { 
+          encoding: 'utf8',
+          cwd: this.workspaceFolder 
+        }).trim()
 
         const staged: string[] = []
         const unstaged: string[] = []
@@ -87,7 +93,10 @@ export class GitCommandManager {
           command += ` -- "${file}"`
         }
 
-        const diff = execSync(command, { encoding: 'utf8' })
+        const diff = execSync(command, { 
+          encoding: 'utf8',
+          cwd: this.workspaceFolder 
+        })
         return diff
       } catch (error) {
         throw new Error('Failed to get git diff')
@@ -101,7 +110,10 @@ export class GitCommandManager {
         let command: string
         if (oneline) {
           command = `git log --oneline -${count}`
-          const output = execSync(command, { encoding: 'utf8' }).trim()
+          const output = execSync(command, { 
+            encoding: 'utf8',
+            cwd: this.workspaceFolder 
+          }).trim()
           return output
             .split('\n')
             .filter((line) => line.trim())
@@ -114,7 +126,10 @@ export class GitCommandManager {
             }))
         } else {
           command = `git log --format="%H|%an|%ad|%s" -${count}`
-          const output = execSync(command, { encoding: 'utf8' }).trim()
+          const output = execSync(command, { 
+            encoding: 'utf8',
+            cwd: this.workspaceFolder 
+          }).trim()
           return output
             .split('\n')
             .filter((line) => line.trim())
@@ -138,10 +153,16 @@ export class GitCommandManager {
     return Promise.resolve().then(() => {
       try {
         // Get current branch
-        const current = execSync('git branch --show-current', { encoding: 'utf8' }).trim()
+        const current = execSync('git branch --show-current', { 
+          encoding: 'utf8',
+          cwd: this.workspaceFolder 
+        }).trim()
 
         // Get local branches
-        const localOutput = execSync('git branch', { encoding: 'utf8' }).trim()
+        const localOutput = execSync('git branch', { 
+          encoding: 'utf8',
+          cwd: this.workspaceFolder 
+        }).trim()
         const local = localOutput
           .split('\n')
           .map((line) => line.replace(/^\*?\s*/, ''))
@@ -150,7 +171,10 @@ export class GitCommandManager {
         // Get remote branches
         let remote: string[] = []
         try {
-          const remoteOutput = execSync('git branch -r', { encoding: 'utf8' }).trim()
+          const remoteOutput = execSync('git branch -r', { 
+            encoding: 'utf8',
+            cwd: this.workspaceFolder 
+          }).trim()
           remote = remoteOutput
             .split('\n')
             .map((line) => line.replace(/^\s*origin\//, '').trim())
@@ -175,7 +199,10 @@ export class GitCommandManager {
       try {
         const fileArgs = files.map((f) => `"${f}"`).join(' ')
         const command = `git add ${fileArgs}`
-        execSync(command, { encoding: 'utf8' })
+        execSync(command, { 
+          encoding: 'utf8',
+          cwd: this.workspaceFolder 
+        })
 
         return {
           success: true,
@@ -194,7 +221,10 @@ export class GitCommandManager {
     return Promise.resolve().then(() => {
       try {
         // Check if there's anything to commit by using git diff --cached
-        const statusOutput = execSync('git diff --cached --name-only', { encoding: 'utf8' }).trim()
+        const statusOutput = execSync('git diff --cached --name-only', { 
+          encoding: 'utf8',
+          cwd: this.workspaceFolder 
+        }).trim()
         if (!statusOutput) {
           return {
             success: false,
@@ -203,7 +233,10 @@ export class GitCommandManager {
         }
 
         const command = `git commit -m "${message}"`
-        const output = execSync(command, { encoding: 'utf8' })
+        const output = execSync(command, { 
+          encoding: 'utf8',
+          cwd: this.workspaceFolder 
+        })
 
         // Extract commit hash from output
         const hashMatch = output.match(/\[[\w\s]+ ([a-f0-9]+)\]/)

@@ -52,7 +52,7 @@ export class ClaudeTermIDEServer {
     this.authToken = randomUUID()
     this.gitReview = new GitReviewManager()
     this.gitPush = new GitPushManager()
-    this.gitCommandManager = new GitCommandManager()
+    this.gitCommandManager = new GitCommandManager(this.options.workspaceFolder)
     this.gitCommandMapper = new GitCommandMapper(this.gitCommandManager)
     this.fileDiscovery = new FileDiscovery()
   }

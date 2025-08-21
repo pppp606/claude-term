@@ -8,7 +8,7 @@ export interface MCPServerOptions {
   serverName?: string
   debug?: boolean
   noWait?: boolean
-  ideServerPort?: number  // Port of IDE server's internal MCP
+  ideServerPort?: number // Port of IDE server's internal MCP
 }
 
 export class ClaudeTermMCPServer {
@@ -16,7 +16,6 @@ export class ClaudeTermMCPServer {
   private transport: StdioServerTransport | null = null
 
   constructor(private options: MCPServerOptions = {}) {
-    
     // Create MCP server with stdio transport
     this.server = new Server(
       {
@@ -27,7 +26,7 @@ export class ClaudeTermMCPServer {
         capabilities: {
           tools: {},
         },
-      }
+      },
     )
 
     this.setupTools()
@@ -113,7 +112,7 @@ export class ClaudeTermMCPServer {
   private async forwardToIdeServer(toolName: string, args: any): Promise<string> {
     try {
       const idePort = this.options.ideServerPort || 12345 // Default fallback port
-      
+
       console.error(`\n🔗 Forwarding ${toolName} to IDE Server on port ${idePort}...`)
 
       const postData = JSON.stringify({
@@ -122,8 +121,8 @@ export class ClaudeTermMCPServer {
         method: 'tools/call',
         params: {
           name: toolName,
-          arguments: args
-        }
+          arguments: args,
+        },
       })
 
       return new Promise(async (resolve, reject) => {
@@ -134,18 +133,18 @@ export class ClaudeTermMCPServer {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Content-Length': Buffer.byteLength(postData)
-          }
+            'Content-Length': Buffer.byteLength(postData),
+          },
         }
 
         const http = await import('http')
         const req = http.request(options, (res: any) => {
           let data = ''
-          
+
           res.on('data', (chunk: any) => {
             data += chunk
           })
-          
+
           res.on('end', () => {
             try {
               const response = JSON.parse(data)

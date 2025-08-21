@@ -4,7 +4,7 @@ describe('GitCommandManager', () => {
   let gitCommandManager: GitCommandManager
 
   beforeEach(() => {
-    gitCommandManager = new GitCommandManager()
+    gitCommandManager = new GitCommandManager(process.cwd())
   })
 
   describe('constructor', () => {
