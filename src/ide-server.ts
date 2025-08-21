@@ -925,14 +925,7 @@ export class ClaudeTermIDEServer {
   }
 
   private isGitRepository(): boolean {
-    try {
-      const workspaceFolder = this.options.workspaceFolder || process.cwd()
-      const fs = require('fs')
-      const path = require('path')
-      return fs.existsSync(path.join(workspaceFolder, '.git'))
-    } catch {
-      return false
-    }
+    return this.gitCommandManager.isGitRepository()
   }
 
   private provideGitCommandHints(command: string, error: string): void {

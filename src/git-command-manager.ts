@@ -1,4 +1,6 @@
 import { execSync } from 'child_process'
+import fs from 'fs'
+import path from 'path'
 
 export interface GitStatus {
   branch: string
@@ -30,8 +32,25 @@ export interface GitOperationResult {
 export class GitCommandManager {
   constructor(private workspaceFolder?: string) {}
 
+  /**
+   * Check if the current workspace is a git repository
+   * @returns true if .git directory exists in workspace
+   */
+  isGitRepository(): boolean {
+    try {
+      const workspaceDir = this.workspaceFolder || process.cwd()
+      return fs.existsSync(path.join(workspaceDir, '.git'))
+    } catch {
+      return false
+    }
+  }
+
   async getStatus(): Promise<GitStatus> {
     return Promise.resolve().then(() => {
+      if (!this.isGitRepository()) {
+        throw new Error('Not a git repository')
+      }
+      
       try {
         // Get current branch
         const branch = execSync('git branch --show-current', { 
@@ -84,6 +103,10 @@ export class GitCommandManager {
 
   async getDiff(file?: string, staged = false): Promise<string> {
     return Promise.resolve().then(() => {
+      if (!this.isGitRepository()) {
+        throw new Error('Not a git repository')
+      }
+      
       try {
         let command = 'git diff'
         if (staged) {
@@ -106,6 +129,10 @@ export class GitCommandManager {
 
   async getLog(count = 10, oneline = false): Promise<GitCommit[]> {
     return Promise.resolve().then(() => {
+      if (!this.isGitRepository()) {
+        throw new Error('Not a git repository')
+      }
+      
       try {
         let command: string
         if (oneline) {
@@ -151,6 +178,10 @@ export class GitCommandManager {
 
   async getBranches(): Promise<GitBranches> {
     return Promise.resolve().then(() => {
+      if (!this.isGitRepository()) {
+        throw new Error('Not a git repository')
+      }
+      
       try {
         // Get current branch
         const current = execSync('git branch --show-current', { 
@@ -196,6 +227,10 @@ export class GitCommandManager {
 
   async addFiles(files: string[]): Promise<GitOperationResult> {
     return Promise.resolve().then(() => {
+      if (!this.isGitRepository()) {
+        throw new Error('Not a git repository')
+      }
+      
       try {
         const fileArgs = files.map((f) => `"${f}"`).join(' ')
         const command = `git add ${fileArgs}`
@@ -219,6 +254,10 @@ export class GitCommandManager {
 
   async createCommit(message: string): Promise<GitOperationResult> {
     return Promise.resolve().then(() => {
+      if (!this.isGitRepository()) {
+        throw new Error('Not a git repository')
+      }
+      
       try {
         // Check if there's anything to commit by using git diff --cached
         const statusOutput = execSync('git diff --cached --name-only', { 
